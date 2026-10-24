@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>DiZcover</title>
+  <meta name="theme-color" content="#151b24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="DiZcover">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map" aria-label="Karte"></div>
+  <canvas id="fog" aria-hidden="true"></canvas>
+
+  <!-- Kopfzeile: Logo links, Fortschritt rechts -->
+  <header class="top">
+    <div class="brand">Di<span>Z</span>cover</div>
+    <div class="progress" id="progress" hidden>
+      <div class="pct" id="pct">0,0 %</div>
+      <div class="pct-label" id="pctLabel">aufgedeckt</div>
+      <div class="bar"><i id="pctBar"></i></div>
+    </div>
+  </header>
+
+  <div class="status" id="status">Suche GPS-Signal …</div>
+
+  <!-- Normale Ansicht -->
+  <div class="dock" id="dockMain">
+    <button class="btn primary" id="btnVeil" type="button">Verschleiern</button>
+    <button class="btn round" id="btnLocate" type="button" aria-label="Auf meinen Standort zentrieren" title="Auf meinen Standort zentrieren">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+
+  <!-- Zeichenmodus -->
+  <div class="draw-hint" id="drawHint" hidden>Tippe Eckpunkte auf die Karte. Zum Schließen auf den ersten Punkt tippen.</div>
+  <div class="dock" id="dockDraw" hidden>
+    <button class="btn ghost" id="btnCancel" type="button">Abbrechen</button>
+    <button class="btn ghost" id="btnUndo" type="button" disabled>Rückgängig</button>
+    <button class="btn primary" id="btnOk" type="button" disabled>OK</button>
+  </div>
+
+  <div class="sim" id="simBanner" hidden>Testmodus: Tippe auf die Karte, um dich dorthin zu bewegen.</div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

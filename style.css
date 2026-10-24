@@ -1,0 +1,90 @@
+/* Vollbild-Karte, UI schwebt als dunkle Glas-Elemente darüber.
+   Farbwelt: Nebel (Schiefer-Blau) + Laternen-Bernstein als Akzent. */
+:root {
+  --fog: #151b24;
+  --glass: rgba(21, 27, 36, 0.86);
+  --line: rgba(232, 236, 242, 0.14);
+  --fg: #e8ecf2;
+  --muted: #9aa6b6;
+  --lantern: #f2b134;
+  --lantern-ink: #241a05;
+  --font-brand: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; margin: 0; background: var(--fog); color: var(--fg); font-family: var(--font-ui); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+#map { position: fixed; inset: 0; background: #2a313b; }
+#fog { position: fixed; inset: 0; pointer-events: none; z-index: 400; }
+
+.top {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: calc(var(--sat) + 12px) max(14px, var(--sar)) 0 max(14px, var(--sal));
+  pointer-events: none;
+}
+.brand {
+  font-family: var(--font-brand); font-weight: 800; font-size: 22px; letter-spacing: -0.02em;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.brand span { color: var(--lantern); }
+
+.progress {
+  pointer-events: auto; min-width: 118px; text-align: right;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 12px;
+  padding: 8px 12px 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.pct { font-family: var(--font-num); font-weight: 700; font-size: 26px; line-height: 1.05; color: var(--lantern); font-variant-numeric: tabular-nums; }
+.pct-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+.bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); margin-top: 7px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--lantern); transition: width .4s ease; }
+
+.status {
+  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%);
+  top: calc(var(--sat) + 64px);
+  font-size: 12px; color: var(--muted); background: var(--glass); border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 12px; white-space: nowrap; pointer-events: none;
+}
+.status.ok { display: none; }
+
+.dock {
+  position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; align-items: center; gap: 10px;
+  padding: 0 max(14px, var(--sar)) calc(var(--sab) + 18px) max(14px, var(--sal));
+  pointer-events: none;
+}
+.dock > * { pointer-events: auto; }
+
+.btn {
+  font: 600 16px/1 var(--font-ui); border-radius: 14px; border: 1px solid var(--line);
+  padding: 15px 22px; color: var(--fg); background: var(--glass); cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  transition: transform .08s ease, opacity .2s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--lantern); outline-offset: 2px; }
+.btn.primary { background: var(--lantern); color: var(--lantern-ink); border-color: transparent; font-family: var(--font-brand); font-weight: 800; letter-spacing: 0.01em; min-width: 150px; }
+.btn.round { width: 52px; height: 52px; padding: 0; display: grid; place-items: center; border-radius: 50%; position: absolute; right: max(14px, var(--sar)); bottom: calc(var(--sab) + 18px); }
+
+.draw-hint, .sim {
+  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--sab) + 86px); width: min(92vw, 420px); box-sizing: border-box;
+  font-size: 14px; line-height: 1.4; text-align: center;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
+}
+.sim { top: calc(var(--sat) + 64px); bottom: auto; font-size: 12px; color: var(--lantern); }
+
+/* Leaflet-Feinschliff */
+.leaflet-control-attribution { font-size: 10px; background: rgba(21,27,36,.7) !important; color: var(--muted) !important; }
+.leaflet-control-attribution a { color: var(--muted) !important; }
+.leaflet-bottom.leaflet-right { margin-bottom: calc(var(--sab) + 80px); }
+.vertex-first { cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) { .bar i, .btn { transition: none; } }
