@@ -160,7 +160,9 @@ body::after {
 .poi { position: absolute; left: 0; top: 0; will-change: transform; }
 .poi > svg { display: block; transform: translate(-50%, -85%); }
 .soul > svg { filter: drop-shadow(0 0 8px rgba(207, 227, 223, 0.9)); animation: hover 2.6s ease-in-out infinite; animation-delay: inherit; }
-.soul.veiled > svg { opacity: 0.5; filter: blur(0.6px) drop-shadow(0 0 10px rgba(207, 227, 223, 0.7)); }
+/* Seelen im Nebel sind unsichtbar – echtes Suchen. Beim Aufdecken blenden sie ein. */
+.soul { transition: opacity .8s ease; }
+.soul.veiled { opacity: 0; }
 .soul.caught > svg { animation: caught .7s ease-in forwards; }
 @keyframes hover { 0%, 100% { transform: translate(-50%, -85%); } 50% { transform: translate(-50%, -100%); } }
 @keyframes caught { to { transform: translate(-50%, -260%) scale(0.3); opacity: 0; } }
