@@ -17,6 +17,9 @@
   const MAX_ACCURACY_M = 40;    // ungenauere GPS-Fixes ignorieren
   const START_BOX_M = 1000;     // Start-Ausschnitt ca. 1 km × 1 km
   const MAX_GRID_CELLS = 1_500_000;
+  const SOUL_COUNT = 8;
+  const PICKUP_M = 5;           // Seele aufnehmen: höchstens 5 m entfernt
+  const GRAVE_M = 10;           // Seelen abgeben: höchstens 10 m vom Friedhof
 
   const sim = new URLSearchParams(location.search).has('sim');
 
@@ -60,7 +63,7 @@
   function queueFog() {
     if (fogQueued) return;
     fogQueued = true;
-    requestAnimationFrame(() => { fogQueued = false; drawFog(); });
+    requestAnimationFrame(() => { fogQueued = false; drawFog(); renderPOIs(); });
   }
 
   function drawFog() {
@@ -143,6 +146,7 @@
       firstFix = false;
       map.flyToBounds(ll.toBounds(START_BOX_M), { duration: 2.2 });
     }
+    checkProximity();
     if (acc && acc > MAX_ACCURACY_M) {
       setStatus(`GPS ungenau (±${Math.round(acc)} m) – noch kein Aufdecken`, false);
       return;
@@ -176,7 +180,7 @@
   const btnVeil = el('btnVeil'), btnOk = el('btnOk'), btnUndo = el('btnUndo');
 
   btnVeil.addEventListener('click', () => {
-    if (state.area && !window.confirm('Neues Gebiet zeichnen? Das bisherige Gebiet und sein Fortschritt werden verworfen.')) return;
+    if (state.area && !window.confirm('Neues Gebiet zeichnen? Das bisherige Gebiet, sein Fortschritt und eine laufende Seelenrunde werden verworfen.')) return;
     startDrawing();
   });
   el('btnCancel').addEventListener('click', stopDrawing);
@@ -188,7 +192,8 @@
   btnOk.addEventListener('click', () => {
     if (!drawing || drawing.length < 3) return;
     const poly = drawing.map(p => [round6(p.lat), round6(p.lng)]);
-    state = { area: poly, points: [] };
+    state = { area: poly, points: [], game: null };
+    clearPOIs();
     pointKeys.clear();
     grid = buildGrid(poly);
     if (lastPos) applyPoint(lastPos.lat, lastPos.lng, true); // Standort sofort aufdecken
@@ -196,6 +201,7 @@
     stopDrawing();
     updateProgress();
     queueFog();
+    askSoulRound();
   });
 
   function startDrawing() {
@@ -261,6 +267,243 @@
         : 'Weiter tippen, oder auf den ersten Punkt tippen bzw. OK drücken, um zu schließen.';
   }
 
+
+  // ---------- Seelenrunde ----------
+  const poiLayer = document.getElementById('poi');
+  let poiEls = [];             // { el, lat, lng, kind, i }
+  let action = null;           // 'pickup' | 'deliver' | null
+  let actionSoul = -1;
+  const btnAction = el('btnAction');
+
+  function distM(lat1, lng1, lat2, lng2) {
+    const dx = (lng2 - lng1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+    const dy = (lat2 - lat1) * 110540;
+    return Math.hypot(dx, dy);
+  }
+
+  function askSoulRound() {
+    showModal({
+      title: 'Seelenrunde?',
+      text: `In deinem Gebiet irren ${SOUL_COUNT} verlorene Seelen umher. Sammle sie alle ein und bring sie zum Seelenfriedhof, damit sie Ruhe finden.`,
+      buttons: [
+        { label: 'Nur erkunden' },
+        { label: 'Seelenrunde starten', primary: true, onClick: startSoulRound }
+      ]
+    });
+  }
+
+  function startSoulRound() {
+    const pts = placePoints(SOUL_COUNT + 1);
+    if (!pts) {
+      showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
+      return;
+    }
+    const [grave, ...souls] = pts;
+    state.game = {
+      grave: { lat: grave[0], lng: grave[1] },
+      souls: souls.map(p => ({ lat: p[0], lng: p[1], taken: false })),
+      startedAt: Date.now(), doneAt: null
+    };
+    save();
+    buildPOIs();
+    updateProgress();
+    checkProximity();
+    queueFog();
+  }
+
+  // Zufällige, gut verteilte Punkte im Polygon (Abstand zueinander, zum Rand und zum Spieler)
+  function placePoints(n) {
+    const g = grid;
+    if (!g || g.total < n * 4) return null;
+    let spacing = Math.max(12, 0.5 * Math.sqrt(g.areaM2 / (n + 1)));
+    let edgeMin = Math.min(15, spacing / 3);
+    let playerMin = Math.min(40, spacing);
+    const me = lastPos ? [(lastPos.lng - g.lng0) * g.kx, (lastPos.lat - g.lat0) * g.ky] : null;
+
+    for (let round = 0; round < 12; round++) {
+      const out = [];
+      let tries = 0;
+      while (out.length < n && tries < 4000) {
+        tries++;
+        const idx = Math.floor(Math.random() * g.W * g.H);
+        if (!g.inside[idx]) continue;
+        const i = idx % g.W, j = (idx / g.W) | 0;
+        const x = g.minX + (i + Math.random()) * g.cell;
+        const y = g.minY + (j + Math.random()) * g.cell;
+        if (edgeDist(g.xy, x, y) < edgeMin) continue;
+        if (me && Math.hypot(x - me[0], y - me[1]) < playerMin) continue;
+        if (out.some(o => Math.hypot(o[0] - x, o[1] - y) < spacing)) continue;
+        out.push([x, y]);
+      }
+      if (out.length === n) return out.map(([x, y]) => [round6(y / g.ky + g.lat0), round6(x / g.kx + g.lng0)]);
+      spacing *= 0.8; edgeMin *= 0.8; playerMin *= 0.8;
+    }
+    return null;
+  }
+
+  function edgeDist(xy, x, y) {
+    let best = Infinity;
+    for (let k = 0, n = xy.length; k < n; k++) {
+      const [x1, y1] = xy[k], [x2, y2] = xy[(k + 1) % n];
+      const dx = x2 - x1, dy = y2 - y1;
+      const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy || 1)));
+      best = Math.min(best, Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)));
+    }
+    return best;
+  }
+
+  const SOUL_SVG = '<svg viewBox="0 0 40 52" width="34" height="44" aria-hidden="true"><defs><radialGradient id="sg" cx="50%" cy="40%" r="60%"><stop offset="0" stop-color="#fffdf4"/><stop offset=".55" stop-color="#cfe3df"/><stop offset="1" stop-color="#7fa59f" stop-opacity="0"/></radialGradient></defs><path d="M20 3c9 0 15 7 15 16 0 7-2 11-2 17 0 4 2 7 4 10-4 1-7-1-9-3-1 3-4 5-8 5s-7-2-8-5c-2 2-5 4-9 3 2-3 4-6 4-10 0-6-2-10-2-17C5 10 11 3 20 3z" fill="url(#sg)"/><circle cx="15" cy="19" r="2.4" fill="#1a1613"/><circle cx="25" cy="19" r="2.4" fill="#1a1613"/><ellipse cx="20" cy="27" rx="2.6" ry="3.4" fill="#1a1613" opacity=".8"/></svg>';
+  const GRAVE_SVG = '<svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true"><ellipse cx="32" cy="58" rx="26" ry="5" fill="#000" opacity=".35"/><path d="M10 58V30c0-6 5-10 11-10h22c6 0 11 4 11 10v28z" fill="#5d5750" stroke="#2a221c" stroke-width="2"/><path d="M16 58V34c0-4 3-7 7-7h18c4 0 7 3 7 7v24z" fill="#7a736a"/><rect x="29.5" y="6" width="5" height="22" rx="1" fill="#b8924a" stroke="#2a221c" stroke-width="1.5"/><rect x="23" y="11" width="18" height="5" rx="1" fill="#b8924a" stroke="#2a221c" stroke-width="1.5"/><path d="M22 41h20M22 47h20" stroke="#2a221c" stroke-width="2" opacity=".55"/></svg>';
+
+  function clearPOIs() {
+    poiLayer.innerHTML = '';
+    poiEls = [];
+    setAction(null);
+  }
+
+  function buildPOIs() {
+    clearPOIs();
+    const g = state.game;
+    if (!g) return;
+    const ge = document.createElement('div');
+    ge.className = 'poi grave';
+    ge.innerHTML = GRAVE_SVG + '<span class="poi-label">Seelenfriedhof</span>';
+    poiLayer.appendChild(ge);
+    poiEls.push({ el: ge, lat: g.grave.lat, lng: g.grave.lng, kind: 'grave' });
+    g.souls.forEach((s, i) => {
+      if (s.taken) return;
+      const e = document.createElement('div');
+      e.className = 'poi soul';
+      e.style.animationDelay = (-i * 0.7) + 's';
+      e.innerHTML = SOUL_SVG;
+      poiLayer.appendChild(e);
+      poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i });
+    });
+  }
+
+  function isRevealed(lat, lng) {
+    const g = grid;
+    if (!g) return true;
+    const i = Math.floor(((lng - g.lng0) * g.kx - g.minX) / g.cell);
+    const j = Math.floor(((lat - g.lat0) * g.ky - g.minY) / g.cell);
+    if (i < 0 || j < 0 || i >= g.W || j >= g.H) return true;
+    const idx = j * g.W + i;
+    return !g.inside[idx] || !!g.revealed[idx];
+  }
+
+  function renderPOIs() {
+    if (!poiEls.length) return;
+    const size = map.getSize();
+    const g = state.game;
+    for (const p of poiEls) {
+      const pt = map.latLngToContainerPoint([p.lat, p.lng]);
+      const off = pt.x < -60 || pt.y < -60 || pt.x > size.x + 60 || pt.y > size.y + 60;
+      p.el.style.display = off ? 'none' : '';
+      if (off) continue;
+      p.el.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
+      p.el.classList.toggle('veiled', !isRevealed(p.lat, p.lng));
+      if (p.kind === 'grave') {
+        const n = g.souls.filter(s => s.taken).length;
+        p.el.classList.toggle('ready', n === SOUL_COUNT && !g.doneAt);
+        p.el.classList.toggle('done', !!g.doneAt);
+      }
+    }
+  }
+
+  function checkProximity() {
+    const g = state.game;
+    if (!g || g.doneAt || !lastPos || drawing) { setAction(null); return; }
+    const { lat, lng } = lastPos;
+    let best = -1, bestD = Infinity;
+    g.souls.forEach((s, i) => {
+      if (s.taken) return;
+      const d = distM(lat, lng, s.lat, s.lng);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (best >= 0 && bestD <= PICKUP_M) { actionSoul = best; setAction('pickup'); return; }
+    const all = g.souls.every(s => s.taken);
+    const dGrave = distM(lat, lng, g.grave.lat, g.grave.lng);
+    if (dGrave <= GRAVE_M) {
+      if (all) { setAction('deliver'); return; }
+      const left = g.souls.filter(s => !s.taken).length;
+      setAction(null);
+      setStatus(`Am Friedhof – es fehlen noch ${left} Seele${left === 1 ? '' : 'n'}`, false);
+      return;
+    }
+    setAction(null);
+  }
+
+  function setAction(kind) {
+    action = kind;
+    if (!btnAction) return;
+    btnAction.hidden = !kind;
+    btnVeil.hidden = !!kind;
+    if (kind === 'pickup') btnAction.textContent = 'Seele aufnehmen';
+    if (kind === 'deliver') btnAction.textContent = 'Seelen abgeben';
+    btnAction.classList.toggle('pulse', !!kind);
+  }
+
+  btnAction.addEventListener('click', () => {
+    const g = state.game;
+    if (!g || !lastPos) return;
+    if (action === 'pickup') {
+      const s = g.souls[actionSoul];
+      if (!s || s.taken || distM(lastPos.lat, lastPos.lng, s.lat, s.lng) > PICKUP_M) { checkProximity(); return; }
+      s.taken = true;
+      save();
+      const pe = poiEls.find(p => p.kind === 'soul' && p.i === actionSoul);
+      if (pe) {
+        pe.el.classList.add('caught');
+        setTimeout(() => { pe.el.remove(); poiEls = poiEls.filter(p => p !== pe); }, 700);
+      }
+      if (navigator.vibrate) navigator.vibrate(60);
+      updateProgress();
+      const n = g.souls.filter(x => x.taken).length;
+      if (n === SOUL_COUNT) {
+        showModal({ title: 'Alle Seelen gefunden', text: 'Bring die acht Seelen jetzt zum Seelenfriedhof, damit sie Ruhe finden.', buttons: [{ label: 'Los geht’s', primary: true }] });
+      }
+      checkProximity();
+      queueFog();
+    } else if (action === 'deliver') {
+      if (!g.souls.every(s => s.taken) || distM(lastPos.lat, lastPos.lng, g.grave.lat, g.grave.lng) > GRAVE_M) { checkProximity(); return; }
+      g.doneAt = Date.now();
+      save();
+      if (navigator.vibrate) navigator.vibrate([80, 60, 160]);
+      updateProgress();
+      setAction(null);
+      queueFog();
+      const mins = Math.max(1, Math.round((g.doneAt - g.startedAt) / 60000));
+      const dur = mins < 60 ? `${mins} Minute${mins === 1 ? '' : 'n'}` : `${Math.floor(mins / 60)} Std. ${mins % 60} Min.`;
+      const pct = grid && grid.total ? (grid.count / grid.total * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '0';
+      showModal({
+        title: 'Geschafft!',
+        text: `Alle ${SOUL_COUNT} Seelen ruhen nun auf dem Friedhof.\nDauer: ${dur} · Aufgedeckt: ${pct} %`,
+        buttons: [{ label: 'Weiter erkunden', primary: true }],
+        win: true
+      });
+    }
+  });
+
+  // ---------- Dialog ----------
+  function showModal({ title, text, buttons, win }) {
+    const m = el('modal');
+    el('modalTitle').textContent = title;
+    el('modalText').textContent = text;
+    m.classList.toggle('win', !!win);
+    const box = el('modalButtons');
+    box.innerHTML = '';
+    for (const b of buttons) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn ' + (b.primary ? 'primary' : 'ghost');
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => { m.hidden = true; if (b.onClick) b.onClick(); });
+      box.appendChild(btn);
+    }
+    m.hidden = false;
+    box.lastChild && box.lastChild.focus();
+  }
+
   // ---------- Raster & Fortschritt ----------
   function buildGrid(poly) {
     const lat0 = poly.reduce((s, p) => s + p[0], 0) / poly.length;
@@ -292,7 +535,7 @@
         for (let i = i0; i <= i1; i++) { inside[j * W + i] = 1; total++; }
       }
     }
-    return { lat0, lng0, kx, ky, minX, minY, cell, W, H, inside, total, revealed: new Uint8Array(W * H), count: 0, areaM2: total * cell * cell };
+    return { lat0, lng0, kx, ky, xy, minX, minY, cell, W, H, inside, total, revealed: new Uint8Array(W * H), count: 0, areaM2: total * cell * cell };
   }
 
   // Deckt das Raster um (lat,lng) auf. Gibt true zurück, wenn ein neuer Punkt gespeichert wurde.
@@ -335,6 +578,16 @@
     el('pctLabel').textContent = 'von ' + (km2 >= 0.1
       ? km2.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' km²'
       : Math.round(grid.areaM2).toLocaleString('de-DE') + ' m²');
+    const soulsEl = el('souls');
+    const g = state.game;
+    soulsEl.hidden = !g;
+    if (g) {
+      const n = g.souls.filter(x => x.taken).length;
+      soulsEl.textContent = g.doneAt ? 'Alle Seelen erlöst'
+        : n === SOUL_COUNT ? 'Alle 8 Seelen! Ab zum Friedhof'
+        : `Seelen ${n} / ${SOUL_COUNT}`;
+      soulsEl.classList.toggle('ready', n === SOUL_COUNT && !g.doneAt);
+    }
   }
 
   // ---------- Hilfsfunktionen ----------
@@ -370,9 +623,9 @@
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (s && Array.isArray(s.points)) return s;
+      if (s && Array.isArray(s.points)) { s.game = s.game || null; return s; }
     } catch (_) { /* leer */ }
-    return { area: null, points: [] };
+    return { area: null, points: [], game: null };
   }
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) { /* Speicher voll/gesperrt */ }
@@ -393,6 +646,7 @@
 
   // Start
   btnVeil.textContent = state.area ? 'Neues Gebiet' : 'Verschleiern';
+  buildPOIs();
   updateProgress();
   queueFog();
   if (sim) {

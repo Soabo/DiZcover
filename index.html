@@ -20,6 +20,7 @@
 <body>
   <div id="map" aria-label="Karte"></div>
   <canvas id="fog" aria-hidden="true"></canvas>
+  <div id="poi" aria-hidden="true"></div>
 
   <!-- Kopfzeile: Logo links, Fortschritt rechts -->
   <header class="top">
@@ -29,6 +30,7 @@
       <div class="pct" id="pct">0,0 %</div>
       <div class="pct-label" id="pctLabel"></div>
       <div class="bar"><i id="pctBar"></i></div>
+      <div class="souls" id="souls" hidden></div>
     </div>
   </header>
 
@@ -37,6 +39,7 @@
   <!-- Normale Ansicht -->
   <div class="dock" id="dockMain">
     <button class="btn primary" id="btnVeil" type="button">Verschleiern</button>
+    <button class="btn primary" id="btnAction" type="button" hidden>Seele aufnehmen</button>
     <button class="btn round" id="btnLocate" type="button" aria-label="Auf meinen Standort zentrieren" title="Auf meinen Standort zentrieren">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>
     </button>
@@ -51,6 +54,14 @@
   </div>
 
   <div class="sim" id="simBanner" hidden>Testmodus: Tippe auf die Karte, um dich dorthin zu bewegen.</div>
+
+  <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <h2 id="modalTitle"></h2>
+      <p id="modalText"></p>
+      <div class="modal-buttons" id="modalButtons"></div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>

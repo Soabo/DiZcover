@@ -2,6 +2,11 @@
 
 Karten-App mit Fog of War: Gebiet als Polygon verschleiern, durch Bewegen (GPS, 15 m Radius) dauerhaft aufdecken, Fortschritt in Prozent oben rechts.
 
+## Seelenrunde
+Nach dem Zeichnen fragt die App, ob eine Seelenrunde gespielt werden soll. Dann werden 8 Seelen und ein Seelenfriedhof zufällig und gut verteilt im Gebiet platziert.
+- Seele aufnehmen: höchstens 5 m entfernt stehen, dann erscheint „Seele aufnehmen“.
+- Sind alle 8 gesammelt: zum Friedhof (höchstens 10 m) und „Seelen abgeben“.
+
 ## Dateien
 - `index.html` – Grundgerüst und Bedienelemente
 - `style.css` – Gestaltung
