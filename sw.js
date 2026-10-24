@@ -1,5 +1,5 @@
 // DiZcover Service Worker: App-Shell offline, Kartenkacheln werden beim Ansehen zwischengespeichert.
-const SHELL = 'dizcover-shell-v2';
+const SHELL = 'dizcover-shell-v3';
 const TILES = 'dizcover-tiles-v1';
 const MAX_TILES = 2000;
 const ASSETS = [
@@ -10,7 +10,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(SHELL).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -39,14 +39,22 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App-Shell & Schriften: Cache zuerst, im Hintergrund aktualisieren
-  e.respondWith(
-    caches.match(e.request).then(hit => {
-      const net = fetch(e.request).then(res => {
-        if (res.ok || res.type === 'opaque') caches.open(SHELL).then(c => c.put(e.request, res.clone()));
+  // Eigene Dateien: erst Netz (immer aktuell), offline aus dem Cache
+  if (url.origin === self.location.origin) {
+    e.respondWith(
+      fetch(e.request, { cache: 'no-cache' }).then(res => {
+        if (res.ok) { const copy = res.clone(); caches.open(SHELL).then(c => c.put(e.request, copy)); }
         return res;
-      }).catch(() => hit);
-      return hit || net;
-    })
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Fremde Dateien (Leaflet, Schriften): Cache zuerst
+  e.respondWith(
+    caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+      if (res.ok || res.type === 'opaque') { const copy = res.clone(); caches.open(SHELL).then(c => c.put(e.request, copy)); }
+      return res;
+    }))
   );
 });
