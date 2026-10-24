@@ -228,3 +228,7 @@ body::after {
 #dockMain { padding-left: max(80px, var(--sal)); padding-right: max(80px, var(--sar)); }
 #dockMain .btn.round { right: max(14px, var(--sar)); }
 .btn.primary.long { min-width: 0; font-size: 18px; line-height: 1.15; padding: 10px 16px 9px; }
+
+/* Ladezustand im Dialog: wandernde Punkte hinter dem Titel */
+.modal.busy .modal-card h2::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1.2s steps(4, end) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }

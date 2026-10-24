@@ -363,9 +363,16 @@
   }
 
   async function startSoulRound() {
-    showModal({ title: 'Seelen erwachen …', text: 'Gebäude und Gewässer im Gebiet werden geprüft, damit keine Seele unerreichbar ist.', buttons: [] });
-    const blockedOk = await loadBlockedAreas();
+    const ctrl = new AbortController();
+    showModal({
+      title: 'Seelen erwachen',
+      text: 'Gebäude und Gewässer im Gebiet werden geprüft, damit keine Seele unerreichbar ist.',
+      busy: true,
+      buttons: [{ label: 'Ohne Prüfung starten', onClick: () => { ctrl.skipped = true; ctrl.abort(); } }]
+    });
+    const result = await loadBlockedAreas(ctrl);
     el('modal').hidden = true;
+    const blockedOk = result !== 'failed';
     const pts = placePoints(SOUL_COUNT + 1);
     if (!pts) {
       showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
@@ -391,30 +398,40 @@
   const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
   const BLOCK_BUFFER_M = 2;     // kleiner Puffer um Gebäude
 
-  async function loadBlockedAreas() {
+  // Beide Server parallel, Gesamtbudget 12 s inklusive Download. Gibt 'ok' | 'skipped' | 'failed' zurück.
+  async function loadBlockedAreas(ctrl) {
     const g = grid;
-    if (!g) return false;
+    if (!g) return 'failed';
     const lats = state.area.map(p => p[0]), lngs = state.area.map(p => p[1]);
     const bbox = [Math.min(...lats), Math.min(...lngs), Math.max(...lats), Math.max(...lngs)].map(v => v.toFixed(6)).join(',');
-    const q = `[out:json][timeout:25];(
+    const q = `[out:json][timeout:10];(
       way["building"](${bbox});relation["building"](${bbox});
       way["natural"="water"](${bbox});relation["natural"="water"](${bbox});
       way["waterway"="riverbank"](${bbox});relation["waterway"="riverbank"](${bbox});
       way["landuse"~"^(reservoir|basin)$"](${bbox});
-    );out geom;`;
-    for (const url of OVERPASS) {
-      try {
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 20000);
-        const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal });
-        clearTimeout(t);
-        if (!res.ok) continue;
-        const data = await res.json();
-        rasterizeBlocked(g, data.elements || []);
-        return true;
-      } catch (_) { /* nächster Server */ }
+    );out skel geom qt;`;
+    const attempt = async url => {
+      const res = await fetch(url, {
+        method: 'POST', body: 'data=' + encodeURIComponent(q),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data || !Array.isArray(data.elements) || (data.remark && /error|timed out/i.test(data.remark))) throw new Error('remark');
+      return data;
+    };
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const data = await Promise.any(OVERPASS.map(attempt));
+      if (ctrl.skipped) return 'skipped';
+      rasterizeBlocked(g, data.elements);
+      return 'ok';
+    } catch (_) {
+      return ctrl.skipped ? 'skipped' : 'failed';
+    } finally {
+      clearTimeout(timer);
+      ctrl.abort();            // die langsamere Anfrage abbrechen
     }
-    return false;
   }
 
   function rasterizeBlocked(g, elements) {
@@ -681,11 +698,12 @@
   }
 
   // ---------- Dialog ----------
-  function showModal({ title, text, buttons, win }) {
+  function showModal({ title, text, buttons, win, busy }) {
     const m = el('modal');
     el('modalTitle').textContent = title;
     el('modalText').textContent = text;
     m.classList.toggle('win', !!win);
+    m.classList.toggle('busy', !!busy);
     const box = el('modalButtons');
     box.innerHTML = '';
     for (const b of buttons) {
