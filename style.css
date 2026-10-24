@@ -18,6 +18,9 @@
   color-scheme: dark;
 }
 
+/* hidden muss immer gewinnen, auch gegen display:flex */
+[hidden] { display: none !important; }
+
 html, body { height: 100%; margin: 0; background: var(--fog); color: var(--fg); font-family: var(--font-ui); overflow: hidden; -webkit-tap-highlight-color: transparent; }
 #map { position: fixed; inset: 0; background: #2a313b; }
 #fog { position: fixed; inset: 0; pointer-events: none; z-index: 400; }

@@ -1,5 +1,5 @@
 // DiZcover Service Worker: App-Shell offline, Kartenkacheln werden beim Ansehen zwischengespeichert.
-const SHELL = 'dizcover-shell-v1';
+const SHELL = 'dizcover-shell-v2';
 const TILES = 'dizcover-tiles-v1';
 const MAX_TILES = 2000;
 const ASSETS = [
