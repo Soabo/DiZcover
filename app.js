@@ -48,7 +48,14 @@
   }).addTo(map);
 
   const accuracyCircle = L.circle([0, 0], { radius: 1, color: '#a3201c', weight: 1, opacity: 0.6, fillOpacity: 0.08, interactive: false });
-  const meMarker = L.circleMarker([0, 0], { radius: 8, color: '#efe3c8', weight: 3, fillColor: '#a3201c', fillOpacity: 1, interactive: false });
+  // Eigene Position: eigenes Element über dem Nebel (nicht als Leaflet-Marker darunter)
+  const meEl = document.createElement('div');
+  meEl.className = 'me';
+  meEl.hidden = true;
+  meEl.innerHTML = '<div class="me-arrow" hidden><svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><path d="M22 0 L29.5 11 L14.5 11 Z" fill="#a3201c" stroke="#efe3c8" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="me-dot"></div>';
+  document.body.appendChild(meEl);
+  let heading = null;          // Bewegungsrichtung in Grad (0 = Nord)
+  let headingFrom = null;      // letzter Punkt für eigene Richtungsberechnung
   const drawLayer = L.layerGroup().addTo(map);
 
   // ---------- Nebel-Canvas ----------
@@ -63,7 +70,7 @@
   function queueFog() {
     if (fogQueued) return;
     fogQueued = true;
-    requestAnimationFrame(() => { fogQueued = false; drawFog(); renderPOIs(); });
+    requestAnimationFrame(() => { fogQueued = false; drawFog(); renderPOIs(); renderMe(); });
   }
 
   function drawFog() {
@@ -135,10 +142,13 @@
     statusEl.classList.toggle('ok', !!ok);
   }
 
-  function onPosition(lat, lng, acc) {
+  function onPosition(lat, lng, acc, gpsHeading, speed) {
     const ll = L.latLng(lat, lng);
     lastPos = ll;
-    meMarker.setLatLng(ll).addTo(map);
+    updateHeading(lat, lng, gpsHeading, speed);
+    meEl.hidden = false;
+    applyHeading();
+    queueFog();
     accuracyCircle.setLatLng(ll).setRadius(acc || 5).addTo(map);
     setStatus('', true);
 
@@ -163,7 +173,7 @@
     setStatus('Testmodus aktiv', false);
   } else if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(
-      pos => onPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+      pos => onPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.heading, pos.coords.speed),
       err => setStatus(err.code === 1 ? 'Standortzugriff verweigert – bitte in den Einstellungen erlauben' : 'Kein GPS-Signal', false),
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
     );
@@ -180,9 +190,69 @@
   const btnVeil = el('btnVeil'), btnOk = el('btnOk'), btnUndo = el('btnUndo');
 
   btnVeil.addEventListener('click', () => {
-    if (state.area && !window.confirm('Neues Gebiet zeichnen? Das bisherige Gebiet, sein Fortschritt und eine laufende Seelenrunde werden verworfen.')) return;
+    const g = state.game;
+    if (g && g.aborted) { resetToStart(); return; }               // "Weiter"
+    if (g && !g.doneAt) {                                         // laufende Jagd
+      showModal({
+        title: 'Seelenjagd beenden?',
+        text: 'Alle Seelen werden auf der Karte aufgedeckt. Danach kannst du ein neues Gebiet zeichnen.',
+        buttons: [
+          { label: 'Nein' },
+          { label: 'Ja, beenden', primary: true, onClick: abortHunt }
+        ]
+      });
+      return;
+    }
+    if (state.area) {
+      showModal({
+        title: 'Neues Gebiet?',
+        text: 'Das bisherige Gebiet und sein Fortschritt werden verworfen.',
+        buttons: [
+          { label: 'Nein' },
+          { label: 'Neues Gebiet', primary: true, onClick: startDrawing }
+        ]
+      });
+      return;
+    }
     startDrawing();
   });
+
+  function setMainLabel() {
+    btnVeil.textContent = mainLabel();
+    btnVeil.classList.toggle('long', btnVeil.textContent.length > 14);
+  }
+
+  function mainLabel() {
+    const g = state.game;
+    if (g && g.aborted) return 'Weiter';
+    if (g && !g.doneAt) return 'Beenden & Seelen aufdecken';
+    return state.area ? 'Neues Gebiet' : 'Verschleiern';
+  }
+
+  function abortHunt() {
+    const g = state.game;
+    if (!g) return;
+    g.aborted = true;
+    save();
+    setAction(null);
+    setMainLabel();
+    buildPOIs();
+    updateProgress();
+    if (grid) map.flyToBounds(L.polygon(state.area).getBounds().pad(0.1), { duration: 1 });
+    queueFog();
+  }
+
+  function resetToStart() {
+    state = { area: null, points: [], game: null };
+    grid = null;
+    pointKeys.clear();
+    save();
+    clearPOIs();
+    setMainLabel();
+    updateProgress();
+    queueFog();
+    if (lastPos) map.flyToBounds(lastPos.toBounds(START_BOX_M), { duration: 1 });
+  }
   el('btnCancel').addEventListener('click', stopDrawing);
   btnUndo.addEventListener('click', () => {
     if (!drawing) return;
@@ -224,7 +294,7 @@
     el('dockDraw').hidden = true;
     el('drawHint').hidden = true;
     fog.style.opacity = '';
-    btnVeil.textContent = state.area ? 'Neues Gebiet' : 'Verschleiern';
+    setMainLabel();
     updateProgress();
   }
 
@@ -305,6 +375,7 @@
       startedAt: Date.now(), doneAt: null
     };
     save();
+    setMainLabel();
     buildPOIs();
     updateProgress();
     checkProximity();
@@ -377,7 +448,8 @@
       e.style.animationDelay = (-i * 0.7) + 's';
       e.innerHTML = SOUL_SVG;
       poiLayer.appendChild(e);
-      poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i });
+      if (g.aborted) e.classList.add('missed');
+      poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i, seen: g.aborted || isRevealed(s.lat, s.lng) });
     });
   }
 
@@ -401,7 +473,9 @@
       p.el.style.display = off ? 'none' : '';
       if (off) continue;
       p.el.style.transform = `translate(${pt.x}px, ${pt.y}px)`;
-      p.el.classList.toggle('veiled', !isRevealed(p.lat, p.lng));
+      const revealed = (g && g.aborted) || isRevealed(p.lat, p.lng);
+      p.el.classList.toggle('veiled', !revealed);
+      if (p.kind === 'soul' && revealed && !p.seen) { p.seen = true; buzz(120); }
       if (p.kind === 'grave') {
         const n = g.souls.filter(s => s.taken).length;
         p.el.classList.toggle('ready', n === SOUL_COUNT && !g.doneAt);
@@ -412,7 +486,7 @@
 
   function checkProximity() {
     const g = state.game;
-    if (!g || g.doneAt || !lastPos || drawing) { setAction(null); return; }
+    if (!g || g.doneAt || g.aborted || !lastPos || drawing) { setAction(null); return; }
     const { lat, lng } = lastPos;
     let best = -1, bestD = Infinity;
     g.souls.forEach((s, i) => {
@@ -434,13 +508,14 @@
   }
 
   function setAction(kind) {
+    if (kind && kind !== action) buzz(kind === 'pickup' ? [40, 60, 40] : [60, 60, 60]);
     action = kind;
     if (!btnAction) return;
     btnAction.hidden = !kind;
     btnVeil.hidden = !!kind;
     if (kind === 'pickup') btnAction.textContent = 'Seele aufnehmen';
     if (kind === 'deliver') btnAction.textContent = 'Seelen abgeben';
-    btnAction.classList.toggle('pulse', !!kind);
+    btnAction.classList.toggle('dance', !!kind);
   }
 
   btnAction.addEventListener('click', () => {
@@ -456,7 +531,7 @@
         pe.el.classList.add('caught');
         setTimeout(() => { pe.el.remove(); poiEls = poiEls.filter(p => p !== pe); }, 700);
       }
-      if (navigator.vibrate) navigator.vibrate(60);
+      buzz(60);
       updateProgress();
       const n = g.souls.filter(x => x.taken).length;
       if (n === SOUL_COUNT) {
@@ -468,9 +543,10 @@
       if (!g.souls.every(s => s.taken) || distM(lastPos.lat, lastPos.lng, g.grave.lat, g.grave.lng) > GRAVE_M) { checkProximity(); return; }
       g.doneAt = Date.now();
       save();
-      if (navigator.vibrate) navigator.vibrate([80, 60, 160]);
+      buzz([80, 60, 160]);
       updateProgress();
       setAction(null);
+      setMainLabel();
       queueFog();
       const mins = Math.max(1, Math.round((g.doneAt - g.startedAt) / 60000));
       const dur = mins < 60 ? `${mins} Minute${mins === 1 ? '' : 'n'}` : `${Math.floor(mins / 60)} Std. ${mins % 60} Min.`;
@@ -478,11 +554,44 @@
       showModal({
         title: 'Geschafft!',
         text: `Alle ${SOUL_COUNT} Seelen ruhen nun auf dem Friedhof.\nDauer: ${dur} · Aufgedeckt: ${pct} %`,
-        buttons: [{ label: 'Weiter erkunden', primary: true }],
+        buttons: [{ label: 'Neues Gebiet', primary: true, onClick: () => { resetToStart(); startDrawing(); } }],
         win: true
       });
     }
   });
+
+  function buzz(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* nicht unterstützt */ }
+  }
+
+  // ---------- Bewegungsrichtung ----------
+  function updateHeading(lat, lng, gpsHeading, speed) {
+    if (gpsHeading != null && !isNaN(gpsHeading) && (speed == null || speed > 0.4)) {
+      heading = gpsHeading;
+      headingFrom = [lat, lng];
+      return;
+    }
+    // Eigene Berechnung aus den letzten Positionen (ab 4 m Bewegung)
+    if (!headingFrom) { headingFrom = [lat, lng]; return; }
+    const dx = (lng - headingFrom[1]) * 111320 * Math.cos(lat * Math.PI / 180);
+    const dy = (lat - headingFrom[0]) * 110540;
+    if (Math.hypot(dx, dy) >= 4) {
+      heading = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+      headingFrom = [lat, lng];
+    }
+  }
+
+  function applyHeading() {
+    const arrow = meEl.querySelector('.me-arrow');
+    arrow.hidden = heading == null;
+    if (heading != null) arrow.style.transform = `rotate(${heading}deg)`;
+  }
+
+  function renderMe() {
+    if (!lastPos || meEl.hidden) return;
+    const pt = map.latLngToContainerPoint(lastPos);
+    meEl.style.transform = `translate(${pt.x - 22}px, ${pt.y - 22}px)`;
+  }
 
   // ---------- Dialog ----------
   function showModal({ title, text, buttons, win }) {
@@ -583,7 +692,8 @@
     soulsEl.hidden = !g;
     if (g) {
       const n = g.souls.filter(x => x.taken).length;
-      soulsEl.textContent = g.doneAt ? 'Alle Seelen erlöst'
+      soulsEl.textContent = g.aborted ? `Jagd beendet · ${n} / ${SOUL_COUNT}`
+        : g.doneAt ? 'Alle Seelen erlöst'
         : n === SOUL_COUNT ? 'Alle 8 Seelen! Ab zum Friedhof'
         : `Seelen ${n} / ${SOUL_COUNT}`;
       soulsEl.classList.toggle('ready', n === SOUL_COUNT && !g.doneAt);
@@ -645,7 +755,7 @@
   }
 
   // Start
-  btnVeil.textContent = state.area ? 'Neues Gebiet' : 'Verschleiern';
+  setMainLabel();
   buildPOIs();
   updateProgress();
   queueFog();
