@@ -4,6 +4,7 @@ Karten-App mit Fog of War: Gebiet als Polygon verschleiern, durch Bewegen (GPS, 
 
 ## Seelenrunde
 Nach dem Zeichnen fragt die App, ob eine Seelenrunde gespielt werden soll. Dann werden 8 Seelen und ein Seelenfriedhof zufällig und gut verteilt im Gebiet platziert.
+- Seelen und Friedhof liegen nie in Gebäuden oder Gewässern (Daten aus OpenStreetMap über die Overpass-Schnittstelle, beim Start der Runde geladen).
 - Seelen sind im Nebel unsichtbar und erscheinen erst, wenn ihre Stelle aufgedeckt wird. Der Friedhof bleibt sichtbar.
 - Seele aufnehmen: höchstens 5 m entfernt stehen, dann erscheint „Seele aufnehmen“.
 - Sind alle 8 gesammelt: zum Friedhof (höchstens 10 m) und „Seelen abgeben“.

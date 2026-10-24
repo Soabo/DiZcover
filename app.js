@@ -362,7 +362,10 @@
     });
   }
 
-  function startSoulRound() {
+  async function startSoulRound() {
+    showModal({ title: 'Seelen erwachen …', text: 'Gebäude und Gewässer im Gebiet werden geprüft, damit keine Seele unerreichbar ist.', buttons: [] });
+    const blockedOk = await loadBlockedAreas();
+    el('modal').hidden = true;
     const pts = placePoints(SOUL_COUNT + 1);
     if (!pts) {
       showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
@@ -379,7 +382,88 @@
     buildPOIs();
     updateProgress();
     checkProximity();
+    if (!blockedOk) showModal({ title: 'Hinweis', text: 'Die Gebäudedaten waren gerade nicht erreichbar. Einzelne Seelen könnten deshalb in Gebäuden oder Gewässern liegen.', buttons: [{ label: 'OK', primary: true }] });
     queueFog();
+  }
+
+
+  // ---------- Gebäude & Gewässer sperren (OpenStreetMap / Overpass) ----------
+  const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+  const BLOCK_BUFFER_M = 2;     // kleiner Puffer um Gebäude
+
+  async function loadBlockedAreas() {
+    const g = grid;
+    if (!g) return false;
+    const lats = state.area.map(p => p[0]), lngs = state.area.map(p => p[1]);
+    const bbox = [Math.min(...lats), Math.min(...lngs), Math.max(...lats), Math.max(...lngs)].map(v => v.toFixed(6)).join(',');
+    const q = `[out:json][timeout:25];(
+      way["building"](${bbox});relation["building"](${bbox});
+      way["natural"="water"](${bbox});relation["natural"="water"](${bbox});
+      way["waterway"="riverbank"](${bbox});relation["waterway"="riverbank"](${bbox});
+      way["landuse"~"^(reservoir|basin)$"](${bbox});
+    );out geom;`;
+    for (const url of OVERPASS) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 20000);
+        const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal });
+        clearTimeout(t);
+        if (!res.ok) continue;
+        const data = await res.json();
+        rasterizeBlocked(g, data.elements || []);
+        return true;
+      } catch (_) { /* nächster Server */ }
+    }
+    return false;
+  }
+
+  function rasterizeBlocked(g, elements) {
+    const blocked = new Uint8Array(g.W * g.H);
+    const toXY = p => [(p.lon - g.lng0) * g.kx, (p.lat - g.lat0) * g.ky];
+    for (const e of elements) {
+      let rings = [];
+      if (e.type === 'way' && e.geometry) rings = [e.geometry.map(toXY)];
+      else if (e.type === 'relation' && e.members) {
+        rings = e.members.filter(m => m.geometry && (m.role === 'outer' || m.role === 'inner')).map(m => m.geometry.filter(Boolean).map(toXY));
+      }
+      rings = rings.filter(r => r.length >= 3);
+      if (rings.length) fillRings(g, rings, blocked);
+    }
+    // Puffer: Nachbarzellen mitsperren
+    const steps = Math.max(1, Math.round(BLOCK_BUFFER_M / g.cell));
+    const out = blocked.slice();
+    for (let j = 0; j < g.H; j++) for (let i = 0; i < g.W; i++) {
+      if (!blocked[j * g.W + i]) continue;
+      for (let dj = -steps; dj <= steps; dj++) for (let di = -steps; di <= steps; di++) {
+        const ii = i + di, jj = j + dj;
+        if (ii >= 0 && jj >= 0 && ii < g.W && jj < g.H) out[jj * g.W + ii] = 1;
+      }
+    }
+    g.blocked = out;
+  }
+
+  // Even-odd-Scanline über alle Ringe eines Objekts (Innenhöfe bleiben frei)
+  function fillRings(g, rings, mask) {
+    let minY = Infinity, maxY = -Infinity;
+    for (const r of rings) for (const [, y] of r) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    const j0 = Math.max(0, Math.floor((minY - g.minY) / g.cell));
+    const j1 = Math.min(g.H - 1, Math.ceil((maxY - g.minY) / g.cell));
+    for (let j = j0; j <= j1; j++) {
+      const y = g.minY + (j + 0.5) * g.cell;
+      const xs = [];
+      for (const r of rings) {
+        for (let k = 0, n = r.length; k < n; k++) {
+          const [x1, y1] = r[k], [x2, y2] = r[(k + 1) % n];
+          if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) xs.push(x1 + (y - y1) / (y2 - y1) * (x2 - x1));
+        }
+      }
+      xs.sort((a, b) => a - b);
+      for (let m = 0; m + 1 < xs.length; m += 2) {
+        const i0 = Math.max(0, Math.ceil((xs[m] - g.minX) / g.cell - 0.5));
+        const i1 = Math.min(g.W - 1, Math.floor((xs[m + 1] - g.minX) / g.cell - 0.5));
+        for (let i = i0; i <= i1; i++) mask[j * g.W + i] = 1;
+      }
+    }
   }
 
   // Zufällige, gut verteilte Punkte im Polygon (Abstand zueinander, zum Rand und zum Spieler)
@@ -397,7 +481,7 @@
       while (out.length < n && tries < 4000) {
         tries++;
         const idx = Math.floor(Math.random() * g.W * g.H);
-        if (!g.inside[idx]) continue;
+        if (!g.inside[idx] || (g.blocked && g.blocked[idx])) continue;
         const i = idx % g.W, j = (idx / g.W) | 0;
         const x = g.minX + (i + Math.random()) * g.cell;
         const y = g.minY + (j + Math.random()) * g.cell;
