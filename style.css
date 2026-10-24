@@ -1,93 +1,156 @@
-/* Vollbild-Karte, UI schwebt als dunkle Glas-Elemente darüber.
-   Farbwelt: Nebel (Schiefer-Blau) + Laternen-Bernstein als Akzent. */
+/* DiZcover im Stil des Escape ReZort: altes Spukhotel.
+   Vergilbte Karte, Papier-Etiketten mit Schreibmaschinenschrift, Stempel-Rot, Messing-Kanten.
+   Layout: Vollbild-Karte, UI schwebt als Schilder/Zettel darüber. */
+
+/* CI-Schriften: liegen die Dateien unter fonts/, werden sie verwendet,
+   sonst greifen die Google-Fonts-Platzhalter (Creepster / Special Elite). */
+@font-face {
+  font-family: "Grooving";
+  src: local("Grooving"), url("fonts/Grooving.woff2") format("woff2"), url("fonts/Grooving.ttf") format("truetype"), url("fonts/Grooving.otf") format("opentype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Grooving Textured";
+  src: local("Grooving Textured"), url("fonts/GroovingTextured.woff2") format("woff2"), url("fonts/GroovingTextured.ttf") format("truetype"), url("fonts/GroovingTextured.otf") format("opentype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Traveling Typewriter";
+  src: local("Traveling _Typewriter"), local("Traveling Typewriter"), url("fonts/TravelingTypewriter.woff2") format("woff2"), url("fonts/TravelingTypewriter.ttf") format("truetype"), url("fonts/TravelingTypewriter.otf") format("opentype");
+  font-display: swap;
+}
+
 :root {
-  --fog: #151b24;
-  --glass: rgba(21, 27, 36, 0.86);
-  --line: rgba(232, 236, 242, 0.14);
-  --fg: #e8ecf2;
-  --muted: #9aa6b6;
-  --lantern: #f2b134;
-  --lantern-ink: #241a05;
-  --font-brand: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-num: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --night: #1a1613;      /* Hotelflur bei Nacht */
+  --ink: #2a221c;        /* Tinte / dunkles Holz */
+  --paper: #efe3c8;      /* vergilbtes Papier */
+  --paper-edge: #cdb98f;
+  --blood: #a3201c;      /* Stempel-Rot */
+  --brass: #b8924a;      /* Messing */
+  --mist: #a7a596;
+  --font-brand: "Grooving Textured", "Grooving", "Creepster", fantasy, serif;
+  --font-brand-clean: "Grooving", "Creepster", fantasy, serif;
+  --font-type: "Traveling Typewriter", "Special Elite", "Courier New", monospace;
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
+  --shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.3);
   color-scheme: dark;
 }
 
 /* hidden muss immer gewinnen, auch gegen display:flex */
 [hidden] { display: none !important; }
 
-html, body { height: 100%; margin: 0; background: var(--fog); color: var(--fg); font-family: var(--font-ui); overflow: hidden; -webkit-tap-highlight-color: transparent; }
-#map { position: fixed; inset: 0; background: #2a313b; }
+html, body { height: 100%; margin: 0; background: var(--night); color: var(--paper); font-family: var(--font-type); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+#map { position: fixed; inset: 0; background: #3a332b; }
 #fog { position: fixed; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; z-index: 400; }
 
+/* Karte wie ein altes, vergilbtes Hotelprospekt + dunkle Vignette */
+.leaflet-tile-pane { filter: sepia(0.6) saturate(0.75) brightness(0.82) contrast(1.08) hue-rotate(-8deg); }
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 450; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(16,12,9,0.55) 100%);
+}
+
+/* ---------- Kopfzeile ---------- */
 .top {
   position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
   display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
   padding: calc(var(--sat) + 12px) max(14px, var(--sar)) 0 max(14px, var(--sal));
   pointer-events: none;
 }
+/* Messing-Türschild */
 .brand {
-  font-family: var(--font-brand); font-weight: 800; font-size: 22px; letter-spacing: -0.02em;
-  background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
-  padding: 6px 12px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-brand); font-size: 30px; line-height: 1; letter-spacing: 0.01em;
+  color: var(--paper);
+  background: linear-gradient(180deg, #2f2620, var(--ink));
+  border: 2px solid var(--brass); outline: 1px solid rgba(0,0,0,0.6); outline-offset: -5px;
+  border-radius: 6px; padding: 8px 14px 6px; box-shadow: var(--shadow);
+  text-shadow: 0 2px 0 rgba(0,0,0,0.5);
 }
-.brand span { color: var(--lantern); }
+.brand span { color: var(--blood); text-shadow: 0 0 10px rgba(163,32,28,0.6), 0 2px 0 rgba(0,0,0,0.5); }
 
+/* Gepäck-/Zimmeranhänger aus Papier */
 .progress {
-  pointer-events: auto; min-width: 118px; text-align: right;
-  background: var(--glass); border: 1px solid var(--line); border-radius: 12px;
-  padding: 8px 12px 10px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto; position: relative; min-width: 128px; text-align: left;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--paper-edge); border-radius: 4px 14px 14px 4px;
+  padding: 10px 14px 12px 26px; box-shadow: var(--shadow);
+  transform: rotate(2.5deg); transform-origin: top right;
+  background-image: radial-gradient(rgba(120,90,40,0.12) 1px, transparent 1.5px);
+  background-size: 7px 7px;
 }
-.pct { font-family: var(--font-num); font-weight: 700; font-size: 26px; line-height: 1.05; color: var(--lantern); font-variant-numeric: tabular-nums; }
-.pct-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
-.bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); margin-top: 7px; overflow: hidden; }
-.bar i { display: block; height: 100%; width: 0; background: var(--lantern); transition: width .4s ease; }
+.progress::before { /* Lochung */
+  content: ""; position: absolute; left: 9px; top: 50%; width: 9px; height: 9px; margin-top: -5px;
+  border-radius: 50%; background: var(--night); box-shadow: inset 0 0 0 2px var(--brass);
+}
+.tag-head { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--blood); }
+.pct { font-family: var(--font-type); font-size: 28px; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.pct-label { font-size: 12px; color: #6b5a44; margin-top: 1px; }
+.bar { height: 5px; margin-top: 8px; background: rgba(42,34,28,0.15); border-radius: 1px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--blood); transition: width .4s ease; }
 
+/* ---------- Hinweise ---------- */
 .status {
-  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%);
-  top: calc(var(--sat) + 64px);
-  font-size: 12px; color: var(--muted); background: var(--glass); border: 1px solid var(--line);
-  border-radius: 999px; padding: 5px 12px; white-space: nowrap; pointer-events: none;
+  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%) rotate(-1deg);
+  top: calc(var(--sat) + 132px);
+  font-size: 13px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-edge);
+  padding: 6px 12px; white-space: nowrap; pointer-events: none; box-shadow: var(--shadow);
 }
 .status.ok { display: none; }
 
+.draw-hint, .sim {
+  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%) rotate(-0.8deg);
+  bottom: calc(var(--sab) + 92px); width: min(90vw, 400px); box-sizing: border-box;
+  font-size: 14px; line-height: 1.45; text-align: center; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--paper-edge); padding: 10px 14px; box-shadow: var(--shadow);
+}
+.sim { top: calc(var(--sat) + 132px); bottom: auto; font-size: 12px; color: var(--blood); }
+
+/* ---------- Buttons ---------- */
 .dock {
   position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0;
   display: flex; justify-content: center; align-items: center; gap: 10px;
-  padding: 0 max(14px, var(--sar)) calc(var(--sab) + 18px) max(14px, var(--sal));
+  padding: 0 max(14px, var(--sar)) calc(var(--sab) + 20px) max(14px, var(--sal));
   pointer-events: none;
 }
 .dock > * { pointer-events: auto; }
 
 .btn {
-  font: 600 16px/1 var(--font-ui); border-radius: 14px; border: 1px solid var(--line);
-  padding: 15px 22px; color: var(--fg); background: var(--glass); cursor: pointer;
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  font: 16px/1 var(--font-type); color: var(--ink); cursor: pointer;
+  background: var(--paper); border: 1px solid var(--paper-edge); border-radius: 4px;
+  padding: 14px 16px; box-shadow: var(--shadow);
   transition: transform .08s ease, opacity .2s ease;
 }
-.btn:active { transform: scale(0.97); }
-.btn:disabled { opacity: 0.4; cursor: default; }
-.btn:focus-visible { outline: 2px solid var(--lantern); outline-offset: 2px; }
-.btn.primary { background: var(--lantern); color: var(--lantern-ink); border-color: transparent; font-family: var(--font-brand); font-weight: 800; letter-spacing: 0.01em; min-width: 150px; }
-.btn.round { width: 52px; height: 52px; padding: 0; display: grid; place-items: center; border-radius: 50%; position: absolute; right: max(14px, var(--sar)); bottom: calc(var(--sab) + 18px); }
-
-.draw-hint, .sim {
-  position: fixed; z-index: 1000; left: 50%; transform: translateX(-50%);
-  bottom: calc(var(--sab) + 86px); width: min(92vw, 420px); box-sizing: border-box;
-  font-size: 14px; line-height: 1.4; text-align: center;
-  background: var(--glass); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
+.btn:active { transform: scale(0.97) rotate(-0.5deg); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+/* Roter Stempel */
+.btn.primary {
+  font-family: var(--font-brand-clean); font-size: 24px; letter-spacing: 0.03em;
+  color: var(--paper); background: var(--blood); min-width: 170px; padding: 13px 22px 11px;
+  border: 2px solid #6f1311; border-radius: 6px;
+  box-shadow: inset 0 0 0 3px rgba(239,227,200,0.25), var(--shadow);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.35);
 }
-.sim { top: calc(var(--sat) + 64px); bottom: auto; font-size: 12px; color: var(--lantern); }
+.btn.ghost { background: var(--paper); }
+/* Kompass-Knopf aus Messing */
+.btn.round {
+  width: 54px; height: 54px; padding: 0; display: grid; place-items: center; border-radius: 50%;
+  position: absolute; right: max(14px, var(--sar)); bottom: calc(var(--sab) + 20px);
+  color: var(--paper); background: radial-gradient(circle at 35% 30%, #d4b06a, var(--brass) 45%, #7a5f2c);
+  border: 2px solid #5e4920;
+}
 
 /* Leaflet-Feinschliff */
-.leaflet-control-attribution { font-size: 10px; background: rgba(21,27,36,.7) !important; color: var(--muted) !important; }
-.leaflet-control-attribution a { color: var(--muted) !important; }
-.leaflet-bottom.leaflet-right { margin-bottom: calc(var(--sab) + 80px); }
-.vertex-first { cursor: pointer; }
+.leaflet-control-attribution { font: 10px var(--font-type) !important; background: rgba(239,227,200,0.75) !important; color: var(--ink) !important; }
+.leaflet-control-attribution a { color: var(--ink) !important; }
+.leaflet-bottom.leaflet-right { margin-bottom: calc(var(--sab) + 84px); }
 
+@media (max-width: 380px) {
+  .btn.primary { min-width: 0; font-size: 21px; }
+  .btn { padding: 12px 12px; font-size: 15px; }
+}
 @media (prefers-reduced-motion: reduce) { .bar i, .btn { transition: none; } }
+#dockDraw .btn.primary { min-width: 0; padding-inline: 20px; }

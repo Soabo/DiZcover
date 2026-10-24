@@ -44,8 +44,8 @@
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
-  const accuracyCircle = L.circle([0, 0], { radius: 1, color: '#f2b134', weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false });
-  const meMarker = L.circleMarker([0, 0], { radius: 8, color: '#241a05', weight: 3, fillColor: '#f2b134', fillOpacity: 1, interactive: false });
+  const accuracyCircle = L.circle([0, 0], { radius: 1, color: '#a3201c', weight: 1, opacity: 0.6, fillOpacity: 0.08, interactive: false });
+  const meMarker = L.circleMarker([0, 0], { radius: 8, color: '#efe3c8', weight: 3, fillColor: '#a3201c', fillOpacity: 1, interactive: false });
   const drawLayer = L.layerGroup().addTo(map);
 
   // ---------- Nebel-Canvas ----------
@@ -90,7 +90,7 @@
     ctx.fillStyle = fogPattern;
     ctx.fill('evenodd');
     ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(242,177,52,0.75)';
+    ctx.strokeStyle = 'rgba(163,32,28,0.85)';
     ctx.setLineDash([8, 6]);
     ctx.stroke();
     ctx.setLineDash([]);
@@ -240,16 +240,16 @@
   function renderDrawing() {
     drawLayer.clearLayers();
     if (!drawing) return;
-    const style = { color: '#f2b134', weight: 3, interactive: false };
+    const style = { color: '#a3201c', weight: 3, interactive: false };
     if (drawing.length >= 2) {
-      if (drawClosed) L.polygon(drawing, { ...style, fillOpacity: 0.25, fillColor: '#151b24' }).addTo(drawLayer);
+      if (drawClosed) L.polygon(drawing, { ...style, fillOpacity: 0.25, fillColor: '#1a1613' }).addTo(drawLayer);
       else L.polyline(drawing, { ...style, dashArray: '6 6' }).addTo(drawLayer);
     }
     drawing.forEach((p, i) => {
       const first = i === 0 && drawing.length >= 3 && !drawClosed;
       L.circleMarker(p, {
-        radius: first ? 11 : 6, color: '#241a05', weight: 2,
-        fillColor: first ? '#ffffff' : '#f2b134', fillOpacity: 1, interactive: false
+        radius: first ? 11 : 6, color: '#1a1613', weight: 2,
+        fillColor: first ? '#efe3c8' : '#a3201c', fillOpacity: 1, interactive: false
       }).addTo(drawLayer);
     });
     btnUndo.disabled = drawing.length === 0;
@@ -348,7 +348,7 @@
     const c = document.createElement('canvas');
     c.width = c.height = s;
     const g = c.getContext('2d');
-    g.fillStyle = 'rgba(28,36,48,0.93)';
+    g.fillStyle = 'rgba(38,40,38,0.94)';
     g.fillRect(0, 0, s, s);
     // weiche Nebelschwaden, kachelbar (an den Rändern gespiegelt gezeichnet)
     let seed = 7;
@@ -358,7 +358,7 @@
       const light = rnd() > 0.5;
       for (const dx of [-s, 0, s]) for (const dy of [-s, 0, s]) {
         const grd = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
-        grd.addColorStop(0, light ? 'rgba(120,135,155,0.10)' : 'rgba(8,12,18,0.12)');
+        grd.addColorStop(0, light ? 'rgba(170,175,165,0.12)' : 'rgba(10,10,8,0.16)');
         grd.addColorStop(1, 'rgba(0,0,0,0)');
         g.fillStyle = grd;
         g.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
