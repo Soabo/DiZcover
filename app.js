@@ -5,14 +5,14 @@
  *     points: [[lat,lng], ...] }       // Positionen, an denen aufgedeckt wurde
  *
  * Fortschritt: Das Polygon wird in ein metrisches Raster (ca. 3–10 m Zellen) zerlegt.
- * Jede Zelle innerhalb von 30 m um einen GPS-Punkt gilt als aufgedeckt.
+ * Jede Zelle innerhalb von 15 m um einen GPS-Punkt gilt als aufgedeckt.
  * Prozent = aufgedeckte Zellen im Polygon / alle Zellen im Polygon.
  */
 (() => {
   'use strict';
 
   const STORE_KEY = 'dizcover.v1';
-  const REVEAL_RADIUS_M = 30;   // Aufdeck-Radius
+  const REVEAL_RADIUS_M = 15;   // Aufdeck-Radius
   const MIN_STEP_M = 5;         // neuen Punkt erst nach 5 m Bewegung speichern
   const MAX_ACCURACY_M = 40;    // ungenauere GPS-Fixes ignorieren
   const START_BOX_M = 1000;     // Start-Ausschnitt ca. 1 km × 1 km

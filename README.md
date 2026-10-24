@@ -1,6 +1,6 @@
 # DiZcover – PWA v0.1
 
-Karten-App mit Fog of War: Gebiet als Polygon verschleiern, durch Bewegen (GPS, 30 m Radius) dauerhaft aufdecken, Fortschritt in Prozent oben rechts.
+Karten-App mit Fog of War: Gebiet als Polygon verschleiern, durch Bewegen (GPS, 15 m Radius) dauerhaft aufdecken, Fortschritt in Prozent oben rechts.
 
 ## Dateien
 - `index.html` – Grundgerüst und Bedienelemente
