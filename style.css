@@ -61,8 +61,7 @@ body::after {
   pointer-events: none;
 }
 /* Messing-Türschild */
-.brand { pointer-events: auto; cursor: pointer; user-select: none; -webkit-user-select: none;
- 
+.brand {
   font-family: var(--font-brand); font-size: 30px; line-height: 1; letter-spacing: 0.01em;
   color: var(--paper);
   background: linear-gradient(180deg, #2f2620, var(--ink));

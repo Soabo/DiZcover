@@ -563,17 +563,9 @@
   });
 
   function buzz(pattern) {
-    try { return navigator.vibrate ? navigator.vibrate(pattern) : null; } catch (_) { return false; }
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* nicht unterstützt */ }
   }
 
-  // Tipp aufs Logo: Vibration testen und Ergebnis anzeigen
-  document.querySelector('.brand').addEventListener('click', () => {
-    const r = buzz([200, 100, 200]);
-    const motion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const msg = r === null ? 'Vibration: von diesem Browser nicht unterstützt'
-      : r ? 'Vibration: Befehl angenommen' : 'Vibration: vom Browser blockiert';
-    showModal({ title: 'Gerätetest', text: msg + (motion ? '\nAnimationen: vom System reduziert' : '\nAnimationen: normal'), buttons: [{ label: 'OK', primary: true }] });
-  });
 
   // ---------- Bewegungsrichtung ----------
   function updateHeading(lat, lng, gpsHeading, speed) {
