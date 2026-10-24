@@ -444,13 +444,15 @@
     g.souls.forEach((s, i) => {
       if (s.taken) return;
       const e = document.createElement('div');
-      e.className = 'poi soul';
+      const shown = g.aborted || isRevealed(s.lat, s.lng);
+      e.className = 'poi soul' + (shown ? '' : ' veiled');
       e.style.animationDelay = (-i * 0.7) + 's';
       e.innerHTML = SOUL_SVG;
       poiLayer.appendChild(e);
       if (g.aborted) e.classList.add('missed');
-      poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i, seen: g.aborted || isRevealed(s.lat, s.lng) });
+      poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i, seen: shown });
     });
+    renderPOIs();
   }
 
   function isRevealed(lat, lng) {
@@ -561,8 +563,17 @@
   });
 
   function buzz(pattern) {
-    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* nicht unterstützt */ }
+    try { return navigator.vibrate ? navigator.vibrate(pattern) : null; } catch (_) { return false; }
   }
+
+  // Tipp aufs Logo: Vibration testen und Ergebnis anzeigen
+  document.querySelector('.brand').addEventListener('click', () => {
+    const r = buzz([200, 100, 200]);
+    const motion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const msg = r === null ? 'Vibration: von diesem Browser nicht unterstützt'
+      : r ? 'Vibration: Befehl angenommen' : 'Vibration: vom Browser blockiert';
+    showModal({ title: 'Gerätetest', text: msg + (motion ? '\nAnimationen: vom System reduziert' : '\nAnimationen: normal'), buttons: [{ label: 'OK', primary: true }] });
+  });
 
   // ---------- Bewegungsrichtung ----------
   function updateHeading(lat, lng, gpsHeading, speed) {

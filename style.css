@@ -61,7 +61,8 @@ body::after {
   pointer-events: none;
 }
 /* Messing-Türschild */
-.brand {
+.brand { pointer-events: auto; cursor: pointer; user-select: none; -webkit-user-select: none;
+ 
   font-family: var(--font-brand); font-size: 30px; line-height: 1; letter-spacing: 0.01em;
   color: var(--paper);
   background: linear-gradient(180deg, #2f2620, var(--ink));
@@ -152,7 +153,7 @@ body::after {
   .btn.primary { min-width: 0; font-size: 21px; }
   .btn { padding: 12px 12px; font-size: 15px; }
 }
-@media (prefers-reduced-motion: reduce) { .bar i, .btn { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 #dockDraw .btn.primary { min-width: 0; padding-inline: 20px; }
 
 /* ---------- Seelenrunde ---------- */
@@ -208,7 +209,8 @@ body::after {
 .modal-buttons .btn.primary { min-width: 0; font-size: 20px; }
 .modal.win .modal-card h2 { font-size: 44px; }
 
-@media (prefers-reduced-motion: reduce) { .soul > svg, .btn.dance { animation: none; } }
+/* Der tanzende Button ist ein Spielsignal und bleibt auch bei reduzierten Animationen an */
+@media (prefers-reduced-motion: reduce) { .soul > svg { animation: none; } }
 
 /* Abgebrochene Jagd: verpasste Seelen sichtbar, aber blass */
 .soul.missed > svg { animation: none; filter: grayscale(0.6) drop-shadow(0 0 6px rgba(207,227,223,0.6)); opacity: 0.85; }
