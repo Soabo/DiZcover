@@ -20,6 +20,17 @@
   const SOUL_COUNT = 8;
   const PICKUP_M = 5;           // Seele aufnehmen: höchstens 5 m entfernt
   const GRAVE_M = 10;           // Seelen abgeben: höchstens 10 m vom Friedhof
+  // Nachtportier
+  const PORTER_CATCH_M = 8;            // so nah = erwischt
+  const PORTER_SENSE_BASE_M = 30;      // Spürweite ohne Seelen …
+  const PORTER_SENSE_PER_SOUL_M = 10;  // … plus pro getragener Seele (Seelenlast)
+  const PORTER_WANDER_SPEED = 0.5;     // m/s beim Patrouillieren
+  const PORTER_HUNT_SPEED = 0.9;       // m/s beim Verfolgen …
+  const PORTER_HUNT_PER_SOUL = 0.04;   // … plus pro Seele (max. ~1,2 m/s, langsamer als Gehen)
+  const PORTER_COOLDOWN_MS = 45000;    // Rückzug nach einem Fang
+  // Seelenkompass
+  const COMPASS_START = 1;
+  const COMPASS_SHOW_MS = 12000;
 
   const sim = new URLSearchParams(location.search).has('sim');
 
@@ -52,7 +63,7 @@
   const meEl = document.createElement('div');
   meEl.className = 'me';
   meEl.hidden = true;
-  meEl.innerHTML = '<div class="me-arrow" hidden><svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><path d="M22 0 L29.5 11 L14.5 11 Z" fill="#a3201c" stroke="#efe3c8" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="me-dot"></div>';
+  meEl.innerHTML = '<div class="me-arrow" hidden><svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><path d="M22 0 L29.5 11 L14.5 11 Z" fill="#a3201c" stroke="#efe3c8" stroke-width="2" stroke-linejoin="round"/></svg></div><div class="me-compass" hidden><svg viewBox="0 0 140 140" width="140" height="140" aria-hidden="true"><line x1="70" y1="62" x2="70" y2="20" stroke="#d4b06a" stroke-width="2" stroke-dasharray="3 4" opacity=".8"/><path d="M70 2 L79 22 L70 17 L61 22 Z" fill="#d4b06a" stroke="#1a1613" stroke-width="1.5" stroke-linejoin="round"/></svg></div><div class="me-dot"></div>';
   document.body.appendChild(meEl);
   let heading = null;          // Bewegungsrichtung in Grad (0 = Nord)
   let headingFrom = null;      // letzter Punkt für eigene Richtungsberechnung
@@ -164,6 +175,7 @@
     if (grid && applyPoint(lat, lng, true)) {
       save();
       updateProgress();
+      checkCompassEarn();
       queueFog();
     }
   }
@@ -238,6 +250,8 @@
     g.aborted = true;
     save();
     setAction(null);
+    setDanger(0);
+    updateCompassButton();
     setMainLabel();
     buildPOIs();
     updateProgress();
@@ -252,6 +266,8 @@
     save();
     clearPOIs();
     setMainLabel();
+    setDanger(0);
+    updateCompassButton();
     updateProgress();
     queueFog();
     if (lastPos) map.flyToBounds(lastPos.toBounds(START_BOX_M), { duration: 1 });
@@ -358,6 +374,11 @@
     showModal({
       title: 'Seelenrunde?',
       text: `In deinem Gebiet irren ${SOUL_COUNT} verlorene Seelen umher. Sammle sie alle ein und bring sie zum Seelenfriedhof, damit sie Ruhe finden.`,
+      list: [
+        'Der Nachtportier streift unsichtbar durch den Nebel. Bemerkt er dich, folgt er dir langsam – das Handy pocht und der Rand färbt sich rot. Erwischt er dich, flieht eine deiner Seelen.',
+        'Seelenlast: Je mehr Seelen du trägst, desto weiter spürt er dich.',
+        'Seelenkompass: zeigt kurz die Richtung zur nächsten Seele. Für je 10 % aufgedecktes Gebiet gibt es eine neue Ladung.'
+      ],
       buttons: [
         { label: 'Nur erkunden' },
         { label: 'Seelenrunde starten', primary: true, onClick: startSoulRound }
@@ -366,21 +387,34 @@
   }
 
   function startSoulRound() {
-    const pts = placePoints(SOUL_COUNT + 1);
+    const pts = placePoints(SOUL_COUNT + 2);
     if (!pts) {
       showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
       return;
     }
+    // Der Punkt am weitesten vom Spieler wird zum Startpunkt des Portiers
+    let pi = 0;
+    if (lastPos) {
+      let best = -1;
+      pts.forEach((p, i) => { const d = distM(lastPos.lat, lastPos.lng, p[0], p[1]); if (d > best) { best = d; pi = i; } });
+    }
+    const porter = pts.splice(pi, 1)[0];
     const [grave, ...souls] = pts;
     state.game = {
       grave: { lat: grave[0], lng: grave[1] },
       souls: souls.map(p => ({ lat: p[0], lng: p[1], taken: false })),
+      porter: { lat: porter[0], lng: porter[1], mode: 'wander', target: null, cooldownUntil: 0 },
+      compass: COMPASS_START,
+      compassEarned: grid && grid.total ? Math.floor(grid.count / grid.total * 10) : 0,
+      caught: 0,
       startedAt: Date.now(), doneAt: null
     };
+    compassUntil = 0;
     save();
     setMainLabel();
     buildPOIs();
     updateProgress();
+    updateCompassButton();
     checkProximity();
     queueFog();
   }
@@ -455,6 +489,13 @@
       if (g.aborted) e.classList.add('missed');
       poiEls.push({ el: e, lat: s.lat, lng: s.lng, kind: 'soul', i, seen: shown });
     });
+    if (g.porter) {
+      const pe = document.createElement('div');
+      pe.className = 'poi porter';
+      pe.innerHTML = PORTER_SVG;
+      poiLayer.appendChild(pe);
+      poiEls.push({ el: pe, lat: g.porter.lat, lng: g.porter.lng, kind: 'porter' });
+    }
     renderPOIs();
   }
 
@@ -473,6 +514,10 @@
     const size = map.getSize();
     const g = state.game;
     for (const p of poiEls) {
+      if (p.kind === 'porter') {
+        p.lat = g.porter.lat; p.lng = g.porter.lng;
+        p.el.classList.toggle('hunting', g.porter.mode === 'hunt' && !g.doneAt && !g.aborted);
+      }
       const pt = map.latLngToContainerPoint([p.lat, p.lng]);
       const off = pt.x < -60 || pt.y < -60 || pt.x > size.x + 60 || pt.y > size.y + 60;
       p.el.style.display = off ? 'none' : '';
@@ -552,18 +597,220 @@
       updateProgress();
       setAction(null);
       setMainLabel();
+      setDanger(0);
+      updateCompassButton();
       queueFog();
       const mins = Math.max(1, Math.round((g.doneAt - g.startedAt) / 60000));
       const dur = mins < 60 ? `${mins} Minute${mins === 1 ? '' : 'n'}` : `${Math.floor(mins / 60)} Std. ${mins % 60} Min.`;
       const pct = grid && grid.total ? (grid.count / grid.total * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '0';
       showModal({
         title: 'Geschafft!',
-        text: `Alle ${SOUL_COUNT} Seelen ruhen nun auf dem Friedhof.\nDauer: ${dur} · Aufgedeckt: ${pct} %`,
+        text: `Alle ${SOUL_COUNT} Seelen ruhen nun auf dem Friedhof.\nDauer: ${dur} · Aufgedeckt: ${pct} %\n${g.caught ? `Vom Nachtportier erwischt: ${g.caught}×` : 'Der Nachtportier hat dich nie erwischt.'}`,
         buttons: [{ label: 'Neues Gebiet', primary: true, onClick: () => { resetToStart(); startDrawing(); } }],
         win: true
       });
     }
   });
+
+
+  // ---------- Nachtportier ----------
+  const PORTER_SVG = '<svg viewBox="0 0 48 66" width="42" height="58" aria-hidden="true"><defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c1714"/><stop offset=".75" stop-color="#1c1714"/><stop offset="1" stop-color="#1c1714" stop-opacity="0"/></linearGradient></defs><path d="M12 30c0-4 5-7 12-7s12 3 12 7l4 34H8z" fill="url(#pg)"/><circle cx="24" cy="31" r="1.6" fill="#b8924a"/><circle cx="24" cy="38" r="1.6" fill="#b8924a"/><circle cx="24" cy="45" r="1.6" fill="#b8924a"/><ellipse cx="24" cy="16" rx="8.5" ry="9.5" fill="#2a221c"/><rect x="13" y="3" width="22" height="7" rx="1.5" fill="#1c1714" stroke="#b8924a" stroke-width="1.2"/><rect x="11" y="9" width="26" height="3" rx="1" fill="#1c1714"/><circle class="eye" cx="20.5" cy="17" r="1.8" fill="#ff3b2f"/><circle class="eye" cx="27.5" cy="17" r="1.8" fill="#ff3b2f"/></svg>';
+  const dangerEl = document.getElementById('danger');
+  let lastTick = 0, nextBeat = 0;
+
+  function carried(g) { return g.souls.filter(s => s.taken).length; }
+  function senseRadius(g) { return PORTER_SENSE_BASE_M + PORTER_SENSE_PER_SOUL_M * carried(g); }
+  function toXY(lat, lng) { return [(lng - grid.lng0) * grid.kx, (lat - grid.lat0) * grid.ky]; }
+  function toLatLng(x, y) { return [round6(y / grid.ky + grid.lat0), round6(x / grid.kx + grid.lng0)]; }
+  function insideXY(x, y) {
+    const i = Math.floor((x - grid.minX) / grid.cell), j = Math.floor((y - grid.minY) / grid.cell);
+    return i >= 0 && j >= 0 && i < grid.W && j < grid.H && !!grid.inside[j * grid.W + i];
+  }
+
+  // Zufälliger Punkt im Gebiet, bevorzugt im Nebel und mit Mindestabstand zum Spieler
+  function randomInside(minFromPlayer, preferVeiled) {
+    const g = grid;
+    const me = lastPos ? toXY(lastPos.lat, lastPos.lng) : null;
+    for (let pass = 0; pass < 3; pass++) {
+      const minD = pass === 2 ? 0 : minFromPlayer;
+      for (let t = 0; t < 3000; t++) {
+        const idx = Math.floor(Math.random() * g.W * g.H);
+        if (!g.inside[idx]) continue;
+        if (preferVeiled && pass === 0 && g.revealed[idx]) continue;
+        const x = g.minX + ((idx % g.W) + Math.random()) * g.cell;
+        const y = g.minY + (((idx / g.W) | 0) + Math.random()) * g.cell;
+        if (me && minD && Math.hypot(x - me[0], y - me[1]) < minD) continue;
+        return toLatLng(x, y);
+      }
+    }
+    return null;
+  }
+
+  function setDanger(v) {
+    if (!dangerEl) return;
+    dangerEl.style.opacity = v.toFixed(2);
+    dangerEl.classList.toggle('beat', v > 0);
+  }
+
+  function gameTick() {
+    const now = Date.now();
+    const dt = lastTick ? Math.min(3, (now - lastTick) / 1000) : 0;
+    lastTick = now;
+    const g = state.game;
+    if (!g || !g.porter || g.doneAt || g.aborted || !grid || drawing) { setDanger(0); return; }
+    const P = g.porter;
+    if (P.cooldownUntil && now < P.cooldownUntil) { setDanger(0); return; }
+
+    let [px, py] = toXY(P.lat, P.lng);
+    const me = lastPos ? toXY(lastPos.lat, lastPos.lng) : null;
+    const sense = senseRadius(g);
+    let dMe = me ? Math.hypot(me[0] - px, me[1] - py) : Infinity;
+
+    if (P.mode !== 'hunt' && dMe <= sense) {
+      P.mode = 'hunt';
+      buzz([200, 80, 200]);
+      setStatus('Der Nachtportier hat dich bemerkt!', false);
+    } else if (P.mode === 'hunt' && dMe > sense * 1.5) {
+      P.mode = 'wander';
+      P.target = null;
+      setStatus('Der Nachtportier hat deine Spur verloren', false);
+    }
+
+    let tx, ty, speed;
+    if (P.mode === 'hunt') {
+      [tx, ty] = me;
+      speed = PORTER_HUNT_SPEED + PORTER_HUNT_PER_SOUL * carried(g);
+    } else {
+      if (!P.target) P.target = randomInside(0, false);
+      if (!P.target) return;
+      [tx, ty] = toXY(P.target[0], P.target[1]);
+      speed = PORTER_WANDER_SPEED;
+    }
+    const dist = Math.hypot(tx - px, ty - py);
+    if (dist > 0.05) {
+      const step = Math.min(dist, speed * dt);
+      const nx = px + (tx - px) / dist * step, ny = py + (ty - py) / dist * step;
+      if (insideXY(nx, ny)) { px = nx; py = ny; }       // der Portier verlässt das Gebiet nie
+      else if (P.mode === 'wander') P.target = null;
+    }
+    if (P.mode === 'wander' && dist < 3) P.target = null;
+    [P.lat, P.lng] = toLatLng(px, py);
+
+    if (me) {
+      dMe = Math.hypot(me[0] - px, me[1] - py);
+      if (dMe <= PORTER_CATCH_M) { porterCaught(); return; }
+    }
+
+    if (P.mode === 'hunt') {
+      const k = Math.max(0, Math.min(1, 1 - (dMe - PORTER_CATCH_M) / (sense * 1.5 - PORTER_CATCH_M)));
+      setDanger(0.2 + 0.65 * k);
+      if (now >= nextBeat) { buzz([35, 90, 35]); nextBeat = now + 700 + 2800 * (1 - k); }
+    } else {
+      setDanger(0);
+    }
+    if (now - (P.savedAt || 0) > 5000) { P.savedAt = now; save(); }
+    queueFog();
+  }
+  setInterval(gameTick, 500);
+
+  function porterCaught() {
+    const g = state.game, P = g.porter;
+    P.mode = 'wander';
+    P.target = null;
+    P.cooldownUntil = Date.now() + PORTER_COOLDOWN_MS;
+    g.caught = (g.caught || 0) + 1;
+    const away = randomInside(90, false);
+    if (away) [P.lat, P.lng] = away;
+
+    const held = g.souls.map((s, i) => s.taken ? i : -1).filter(i => i >= 0);
+    let text;
+    if (held.length) {
+      const i = held[Math.floor(Math.random() * held.length)];
+      const spot = randomInside(40, true) || [g.souls[i].lat, g.souls[i].lng];
+      g.souls[i] = { lat: spot[0], lng: spot[1], taken: false };
+      text = 'Der Nachtportier hat dir eine Seele entrissen. Sie ist zurück in den Nebel geflohen.';
+    } else {
+      text = 'Der Nachtportier hat dich erwischt. Zum Glück trugst du keine Seele bei dir.';
+    }
+    save();
+    buzz([400, 120, 400]);
+    setDanger(0);
+    buildPOIs();
+    updateProgress();
+    checkProximity();
+    queueFog();
+    showModal({ title: 'Erwischt!', text: text + '\nEr zieht sich für einen Moment zurück.', buttons: [{ label: 'Weiter', primary: true }] });
+  }
+
+  // ---------- Seelenkompass ----------
+  const btnCompass = el('btnCompass');
+  const needleEl = meEl.querySelector('.me-compass');
+  let compassUntil = 0, compassTimer = null;
+
+  function updateCompassButton() {
+    const g = state.game;
+    const active = !!(g && g.porter && !g.doneAt && !g.aborted);
+    btnCompass.hidden = !active;
+    if (!active) { hideNeedle(); return; }
+    el('compassCount').textContent = g.compass || 0;
+    btnCompass.disabled = !(g.compass > 0) || Date.now() < compassUntil;
+  }
+
+  function checkCompassEarn() {
+    const g = state.game;
+    if (!g || !g.porter || g.doneAt || g.aborted || !grid || !grid.total) return;
+    const tens = Math.floor(grid.count / grid.total * 10);
+    if (tens > (g.compassEarned || 0)) {
+      const add = tens - (g.compassEarned || 0);
+      g.compassEarned = tens;
+      g.compass = (g.compass || 0) + add;
+      save();
+      updateCompassButton();
+      btnCompass.classList.remove('charged'); void btnCompass.offsetWidth; btnCompass.classList.add('charged');
+      buzz([40, 40, 40]);
+    }
+  }
+
+  function compassTarget() {
+    const g = state.game;
+    if (!g || !lastPos) return null;
+    let best = null, bestD = Infinity;
+    for (const s of g.souls) {
+      if (s.taken) continue;
+      const d = distM(lastPos.lat, lastPos.lng, s.lat, s.lng);
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    return best || g.grave;      // alle getragen: zum Friedhof
+  }
+
+  btnCompass.addEventListener('click', () => {
+    const g = state.game;
+    if (!g || !(g.compass > 0) || !lastPos || Date.now() < compassUntil) return;
+    g.compass--;
+    save();
+    compassUntil = Date.now() + COMPASS_SHOW_MS;
+    needleEl.hidden = false;
+    needleEl.classList.remove('fade'); void needleEl.offsetWidth; needleEl.classList.add('fade');
+    updateCompassNeedle();
+    updateCompassButton();
+    buzz(30);
+    clearTimeout(compassTimer);
+    compassTimer = setTimeout(() => { hideNeedle(); updateCompassButton(); }, COMPASS_SHOW_MS);
+  });
+
+  function hideNeedle() {
+    compassUntil = 0;
+    if (needleEl) needleEl.hidden = true;
+  }
+
+  function updateCompassNeedle() {
+    if (!needleEl || needleEl.hidden || !lastPos) return;
+    const t = compassTarget();
+    if (!t) { hideNeedle(); return; }
+    const dx = (t.lng - lastPos.lng) * 111320 * Math.cos(lastPos.lat * Math.PI / 180);
+    const dy = (t.lat - lastPos.lat) * 110540;
+    needleEl.style.transform = `rotate(${Math.atan2(dx, dy) * 180 / Math.PI}deg)`;
+  }
 
   function buzz(pattern) {
     try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* nicht unterstützt */ }
@@ -597,6 +844,7 @@
     if (!lastPos || meEl.hidden) return;
     const pt = map.latLngToContainerPoint(lastPos);
     meEl.style.transform = `translate(${pt.x - 22}px, ${pt.y - 22}px)`;
+    updateCompassNeedle();
   }
 
   // ---------- Hilfe bei verweigertem Standort ----------
@@ -804,6 +1052,7 @@
   setMainLabel();
   buildPOIs();
   updateProgress();
+  updateCompassButton();
   queueFog();
   if (sim) {
     // Testmodus: Start in Deggendorf-Mitte

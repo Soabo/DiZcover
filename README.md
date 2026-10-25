@@ -8,6 +8,13 @@ Nach dem Zeichnen fragt die App, ob eine Seelenrunde gespielt werden soll. Dann 
 - Seele aufnehmen: höchstens 5 m entfernt stehen, dann erscheint „Seele aufnehmen“.
 - Sind alle 8 gesammelt: zum Friedhof (höchstens 10 m) und „Seelen abgeben“.
 
+### Nachtportier, Seelenlast, Seelenkompass
+- Der Nachtportier patrouilliert unsichtbar im Gebiet (0,5 m/s). Spürt er dich, folgt er dir mit 0,9–1,2 m/s (langsamer als Gehen). Bei ≤ 8 m Abstand flieht eine getragene Seele an einen neuen Ort im Nebel; danach zieht er sich 45 s zurück.
+- Seelenlast: Spürweite 30 m + 10 m pro getragener Seele.
+- Bei Verfolgung: roter, pochender Bildschirmrand und Vibrations-Herzschlag, je näher desto stärker.
+- Seelenkompass (Knopf unten links): 1 Ladung zum Start, +1 je 10 % aufgedecktes Gebiet. Zeigt 12 s lang die Richtung zur nächsten Seele (bzw. zum Friedhof, wenn alle getragen werden).
+- Alle Werte stehen als Konstanten oben in `app.js`.
+
 ## Dateien
 - `index.html` – Grundgerüst und Bedienelemente
 - `style.css` – Gestaltung
