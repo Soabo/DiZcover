@@ -13,6 +13,7 @@ Beim Dialog „Seelenrunde?“ werden die Positionen schon ausgewürfelt und im 
 
 ### Nachtportier, Seelenlast, Seelenkompass
 - Der Nachtportier patrouilliert unsichtbar im Gebiet (0,5 m/s). Spürt er dich, folgt er dir mit 0,9–1,2 m/s (langsamer als Gehen). Bei ≤ 8 m Abstand flieht eine getragene Seele an einen neuen Ort im Nebel; danach zieht er sich 45 s zurück.
+- Der Portier läuft nur auf Straßen und Wegen: Beim Start der Runde werden die Kartenkacheln des Gebiets (Zoom 17, bei großen Gebieten 16, max. 80 Kacheln) eingelesen, Straßen-/Wegfarben ergeben ein Netz, auf dem er per Breitensuche läuft. Abseits der Straße (Wiese, Platz) kann er dich nur erwischen, wenn du ≤ 8 m an seinem Weg stehst. Ohne lesbare Karte läuft er in Luftlinie.
 - Seelenlast: Spürweite 30 m + 10 m pro getragener Seele.
 - Bei Verfolgung: roter, pochender Bildschirmrand und Vibrations-Herzschlag, je näher desto stärker.
 - Seelenkompass (Knopf unten links): 1 Ladung zum Start, +1 je 10 % aufgedecktes Gebiet. Zeigt 12 s lang die Richtung zur nächsten Seele (bzw. zum Friedhof, wenn alle getragen werden).

@@ -374,6 +374,7 @@
 
   function askSoulRound() {
     pendingPlan = preparePlan();     // Platzierung + Prüfung laufen schon, während der Dialog offen ist
+    ensureNav();                     // Straßennetz für den Portier ebenfalls im Hintergrund
     showModal({
       title: 'Seelenrunde?',
       text: `In deinem Gebiet irren ${SOUL_COUNT} verlorene Seelen umher. Sammle sie alle ein und bring sie zum Seelenfriedhof, damit sie Ruhe finden.`,
@@ -429,6 +430,7 @@
       startedAt: Date.now(), doneAt: null
     };
     compassUntil = 0;
+    snapPorterToRoad();          // falls das Straßennetz schon fertig ist
     save();
     setMainLabel();
     buildPOIs();
@@ -461,15 +463,17 @@
     return { tx, ty, px: Math.floor((x - tx) * 256), py: Math.floor((y - ty) * 256) };
   }
 
-  function loadTile(tx, ty) {
-    const key = tx + '/' + ty;
+  function loadTile(tx, ty) { return loadTileZ(CHECK_Z, tx, ty); }
+
+  function loadTileZ(z, tx, ty) {
+    const key = z + '/' + tx + '/' + ty;
     if (!tileCache.has(key)) {
       const job = (async () => {
         if (tileCheckBroken) return null;
         try {
           const ctrl = new AbortController();
           const t = setTimeout(() => ctrl.abort(), 8000);
-          const res = await fetch(`https://tile.openstreetmap.org/${CHECK_Z}/${tx}/${ty}.png`, { mode: 'cors', signal: ctrl.signal });
+          const res = await fetch(`https://tile.openstreetmap.org/${z}/${tx}/${ty}.png`, { mode: 'cors', signal: ctrl.signal });
           clearTimeout(t);
           if (!res.ok) return null;
           const bmp = await createImageBitmap(await res.blob());
@@ -799,24 +803,30 @@
       setStatus('Der Nachtportier hat deine Spur verloren', false);
     }
 
-    let tx, ty, speed;
-    if (P.mode === 'hunt') {
-      [tx, ty] = me;
-      speed = PORTER_HUNT_SPEED + PORTER_HUNT_PER_SOUL * carried(g);
+    const speed = P.mode === 'hunt'
+      ? PORTER_HUNT_SPEED + PORTER_HUNT_PER_SOUL * carried(g)
+      : PORTER_WANDER_SPEED;
+    if (nav && nav.area === state.area) {
+      [px, py] = navStep(P, px, py, me, speed * dt);   // nur auf Straßen und Wegen
     } else {
-      if (!P.target) P.target = randomInside(0, false);
-      if (!P.target) return;
-      [tx, ty] = toXY(P.target[0], P.target[1]);
-      speed = PORTER_WANDER_SPEED;
+      // Fallback ohne Straßennetz: Luftlinie
+      let tx, ty;
+      if (P.mode === 'hunt') {
+        [tx, ty] = me;
+      } else {
+        if (!P.target) P.target = randomInside(0, false);
+        if (!P.target) return;
+        [tx, ty] = toXY(P.target[0], P.target[1]);
+      }
+      const dist = Math.hypot(tx - px, ty - py);
+      if (dist > 0.05) {
+        const step = Math.min(dist, speed * dt);
+        const nx = px + (tx - px) / dist * step, ny = py + (ty - py) / dist * step;
+        if (insideXY(nx, ny)) { px = nx; py = ny; }       // der Portier verlässt das Gebiet nie
+        else if (P.mode === 'wander') P.target = null;
+      }
+      if (P.mode === 'wander' && dist < 3) P.target = null;
     }
-    const dist = Math.hypot(tx - px, ty - py);
-    if (dist > 0.05) {
-      const step = Math.min(dist, speed * dt);
-      const nx = px + (tx - px) / dist * step, ny = py + (ty - py) / dist * step;
-      if (insideXY(nx, ny)) { px = nx; py = ny; }       // der Portier verlässt das Gebiet nie
-      else if (P.mode === 'wander') P.target = null;
-    }
-    if (P.mode === 'wander' && dist < 3) P.target = null;
     [P.lat, P.lng] = toLatLng(px, py);
 
     if (me) {
@@ -835,6 +845,257 @@
     queueFog();
   }
   setInterval(gameTick, 500);
+
+
+  // ---------- Straßennetz für den Nachtportier ----------
+  // Die Kartenkacheln des Gebiets werden eingelesen; Pixel in Straßen-/Wegfarben
+  // (laut openstreetmap-carto) ergeben ein Raster begehbarer Zellen. Der Portier
+  // folgt darauf einem Wegfeld (Breitensuche) – wie ein Navi.
+  const ROAD_COLORS = [
+    [[255, 255, 255], 8],   // Wohn-, Neben-, Tertiärstraßen, Wegränder
+    [[247, 250, 191], 14],  // Sekundärstraße
+    [[252, 214, 164], 14],  // Primärstraße
+    [[249, 178, 156], 14],  // Bundesstraße (trunk)
+    [[237, 237, 237], 5],   // verkehrsberuhigt
+    [[221, 221, 232], 6],   // Fußgängerzone
+    [[250, 128, 114], 30],  // Fußweg, Pfad, Treppe (salmon)
+    [[0, 0, 255], 60],      // Radweg
+    [[0, 128, 0], 50],      // Reitweg
+    [[153, 102, 0], 40]     // Feld-/Wirtschaftsweg
+  ];
+  const NAV_MAX_TILES = 80;
+  let nav = null;            // { area, cell, W, H, ox, oy, main: Uint8Array, nearest: Int32Array, fields }
+  let navBuilding = null;
+
+  function isRoadColor(r, g, b) {
+    for (const [c, tol] of ROAD_COLORS) {
+      if (Math.abs(c[0] - r) + Math.abs(c[1] - g) + Math.abs(c[2] - b) <= tol) return true;
+    }
+    return false;
+  }
+
+  function ensureNav() {
+    if (!state.area || !grid) return;
+    if (nav && nav.area === state.area) return;
+    if (navBuilding && navBuilding.area === state.area) return;
+    const area = state.area;
+    navBuilding = { area };
+    buildNav(area).then(n => {
+      if (navBuilding && navBuilding.area === area) navBuilding = null;
+      if (n && state.area === area) { nav = n; snapPorterToRoad(); }
+    });
+  }
+
+  async function buildNav(area) {
+    const g = grid;
+    if (!g || tileCheckBroken) return null;
+    const lats = area.map(p => p[0]), lngs = area.map(p => p[1]);
+    const latMin = Math.min(...lats), latMax = Math.max(...lats), lngMin = Math.min(...lngs), lngMax = Math.max(...lngs);
+
+    // Zoomstufe wählen, sodass höchstens NAV_MAX_TILES Kacheln nötig sind
+    const gpx = (lat, lng, z) => {
+      const n = 2 ** z * 256, r = lat * Math.PI / 180;
+      return [(lng + 180) / 360 * n, (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n];
+    };
+    let z = 17, t0, t1;
+    for (; z >= 16; z--) {
+      const a = gpx(latMax, lngMin, z), b = gpx(latMin, lngMax, z);
+      t0 = [Math.floor(a[0] / 256), Math.floor(a[1] / 256)];
+      t1 = [Math.floor(b[0] / 256), Math.floor(b[1] / 256)];
+      if ((t1[0] - t0[0] + 1) * (t1[1] - t0[1] + 1) <= NAV_MAX_TILES) break;
+    }
+    if (z < 16) return null;
+
+    // Kacheln laden (max. 6 gleichzeitig)
+    const tiles = new Map();
+    const list = [];
+    for (let tx = t0[0]; tx <= t1[0]; tx++) for (let ty = t0[1]; ty <= t1[1]; ty++) list.push([tx, ty]);
+    let fails = 0;
+    const worker = async () => {
+      while (list.length) {
+        const [tx, ty] = list.pop();
+        const d = await loadTileZ(z, tx, ty);
+        if (d) tiles.set(tx + '/' + ty, d); else fails++;
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+    if (state.area !== area || tileCheckBroken || fails > tiles.size * 0.25) return null;
+
+    // Navigationsraster über das Gebiet
+    const gw = g.W * g.cell, gh = g.H * g.cell;
+    const cell = Math.max(2.5, Math.sqrt(gw * gh / 200000));
+    const W = Math.ceil(gw / cell), H = Math.ceil(gh / cell), N = W * H;
+    const ox = g.minX, oy = g.minY;
+    const road = new Uint8Array(N);
+    const sampleRoad = (x, y) => {
+      const lat = y / g.ky + g.lat0, lng = x / g.kx + g.lng0;
+      const [px, py] = gpx(lat, lng, z);
+      const tx = Math.floor(px / 256), ty = Math.floor(py / 256);
+      const d = tiles.get(tx + '/' + ty);
+      if (!d) return false;
+      const o = ((Math.floor(py) - ty * 256) * 256 + (Math.floor(px) - tx * 256)) * 4;
+      return isRoadColor(d[o], d[o + 1], d[o + 2]);
+    };
+    const inside = new Uint8Array(N);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const cx = ox + (i + 0.5) * cell, cy = oy + (j + 0.5) * cell;
+      if (!insideXY(cx, cy)) continue;
+      inside[j * W + i] = 1;
+      let hits = 0;
+      for (let a = -1; a <= 1 && hits < 2; a++) for (let b = -1; b <= 1 && hits < 2; b++) {
+        if (sampleRoad(cx + a * cell / 3, cy + b * cell / 3)) hits++;
+      }
+      if (hits >= 2) road[j * W + i] = 1;
+    }
+    // Lücken (gestrichelte Wege, Beschriftungen) schließen: einmal ausdehnen
+    const walk = new Uint8Array(N);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const k = j * W + i;
+      if (!inside[k]) continue;
+      let on = road[k];
+      for (let dj = -1; dj <= 1 && !on; dj++) for (let di = -1; di <= 1 && !on; di++) {
+        const ii = i + di, jj = j + dj;
+        if (ii >= 0 && jj >= 0 && ii < W && jj < H && road[jj * W + ii]) on = 1;
+      }
+      walk[k] = on;
+    }
+    // Größtes zusammenhängendes Netz behalten
+    const comp = new Int32Array(N).fill(-1);
+    const q = new Int32Array(N);
+    let bestId = -1, bestSize = 0, id = 0;
+    for (let k = 0; k < N; k++) {
+      if (!walk[k] || comp[k] >= 0) continue;
+      let h = 0, t = 0, size = 0;
+      q[t++] = k; comp[k] = id;
+      while (h < t) {
+        const c = q[h++]; size++;
+        const ci = c % W, cj = (c / W) | 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const ii = ci + di, jj = cj + dj;
+          if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+          const nk = jj * W + ii;
+          if (walk[nk] && comp[nk] < 0) { comp[nk] = id; q[t++] = nk; }
+        }
+      }
+      if (size > bestSize) { bestSize = size; bestId = id; }
+      id++;
+    }
+    // Kachel-Pixel werden nicht mehr gebraucht: Speicher freigeben
+    for (const key of tiles.keys()) tileCache.delete(z + '/' + key);
+    tiles.clear();
+    if (bestSize < 40) return null;
+    const main = new Uint8Array(N);
+    for (let k = 0; k < N; k++) if (comp[k] === bestId) main[k] = 1;
+
+    // Für jede Zelle: nächste Straßenzelle (Mehrquellen-Breitensuche)
+    const nearest = new Int32Array(N).fill(-1);
+    let h = 0, t = 0;
+    for (let k = 0; k < N; k++) if (main[k]) { nearest[k] = k; q[t++] = k; }
+    while (h < t) {
+      const c = q[h++];
+      const ci = c % W, cj = (c / W) | 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = ci + di, jj = cj + dj;
+        if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+        const nk = jj * W + ii;
+        if (nearest[nk] < 0) { nearest[nk] = nearest[c]; q[t++] = nk; }
+      }
+    }
+    return { area, cell, W, H, ox, oy, main, nearest, q, size: bestSize, hunt: null, wander: null };
+  }
+
+  function navCellOf(x, y) {
+    const i = Math.min(nav.W - 1, Math.max(0, Math.floor((x - nav.ox) / nav.cell)));
+    const j = Math.min(nav.H - 1, Math.max(0, Math.floor((y - nav.oy) / nav.cell)));
+    return j * nav.W + i;
+  }
+  function navCenter(k) { return [nav.ox + ((k % nav.W) + 0.5) * nav.cell, nav.oy + (((k / nav.W) | 0) + 0.5) * nav.cell]; }
+
+  // Breitensuche vom Ziel aus: jede Straßenzelle kennt ihren Abstand zum Ziel
+  function navField(goal) {
+    const { W, H, main, q } = nav;
+    const f = new Int32Array(W * H).fill(-1);
+    let h = 0, t = 0;
+    f[goal] = 0; q[t++] = goal;
+    while (h < t) {
+      const c = q[h++];
+      const ci = c % W, cj = (c / W) | 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = ci + di, jj = cj + dj;
+        if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+        const nk = jj * W + ii;
+        if (main[nk] && f[nk] < 0) { f[nk] = f[c] + 1; q[t++] = nk; }
+      }
+    }
+    return { goal, f };
+  }
+
+  function randomRoadCell() {
+    for (let t = 0; t < 5000; t++) {
+      const k = Math.floor(Math.random() * nav.W * nav.H);
+      if (nav.main[k]) return k;
+    }
+    return -1;
+  }
+
+  // Unsichtbarer Portier wird beim Fertigwerden des Netzes auf die nächste Straße gesetzt
+  function snapPorterToRoad() {
+    const g = state.game;
+    if (!nav || !g || !g.porter || !grid) return;
+    const [x, y] = toXY(g.porter.lat, g.porter.lng);
+    const k = navCellOf(x, y);
+    if (nav.main[k] || isRevealed(g.porter.lat, g.porter.lng)) return;
+    const r = nav.nearest[k];
+    if (r < 0) return;
+    const [cx, cy] = navCenter(r);
+    [g.porter.lat, g.porter.lng] = toLatLng(cx, cy);
+    save();
+  }
+
+  // Bewegt den Portier um "budget" Meter entlang des Straßennetzes
+  function navStep(P, px, py, me, budget) {
+    let field;
+    if (P.mode === 'hunt' && me) {
+      const goal = nav.nearest[navCellOf(me[0], me[1])];
+      if (goal < 0) return [px, py];
+      if (!nav.hunt || nav.hunt.goal !== goal) nav.hunt = navField(goal);
+      field = nav.hunt;
+    } else {
+      let k = navCellOf(px, py);
+      if (!nav.wander || nav.wander.f[k] === 0 || nav.wander.f[nav.nearest[k]] < 0) {
+        const goal = randomRoadCell();
+        if (goal < 0) return [px, py];
+        nav.wander = navField(goal);
+      }
+      field = nav.wander;
+    }
+    const { W, H, main } = nav;
+    for (let guard = 0; guard < 50 && budget > 0.01; guard++) {
+      const c = navCellOf(px, py);
+      let tk;
+      if (!main[c]) {
+        tk = nav.nearest[c];                     // erst zurück auf die Straße
+      } else {
+        const fc = field.f[c];
+        let best = c, bestF = fc;
+        const ci = c % W, cj = (c / W) | 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+          const ii = ci + di, jj = cj + dj;
+          if (ii < 0 || jj < 0 || ii >= W || jj >= H) continue;
+          const nk = jj * W + ii;
+          if (main[nk] && field.f[nk] >= 0 && field.f[nk] < bestF) { bestF = field.f[nk]; best = nk; }
+        }
+        tk = best;
+      }
+      if (tk < 0) break;
+      const [tx, ty] = navCenter(tk);
+      const d = Math.hypot(tx - px, ty - py);
+      if (d < 0.01) break;                       // am Ziel angekommen
+      if (d <= budget) { px = tx; py = ty; budget -= d; }
+      else { px += (tx - px) / d * budget; py += (ty - py) / d * budget; budget = 0; }
+    }
+    return [px, py];
+  }
 
   function porterCaught() {
     const g = state.game, P = g.porter;
@@ -1176,7 +1437,7 @@
   buildPOIs();
   updateProgress();
   updateCompassButton();
-  if (state.game && !state.game.doneAt && !state.game.aborted && grid) validatePlan(state.game);
+  if (state.game && !state.game.doneAt && !state.game.aborted && grid) { validatePlan(state.game); if (state.game.porter) ensureNav(); }
   queueFog();
   if (sim) {
     // Testmodus: Start in Deggendorf-Mitte
