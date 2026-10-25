@@ -174,7 +174,10 @@
   } else if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(
       pos => onPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.heading, pos.coords.speed),
-      err => setStatus(err.code === 1 ? 'Standortzugriff verweigert – bitte in den Einstellungen erlauben' : 'Kein GPS-Signal', false),
+      err => {
+        if (err.code === 1) { setStatus('Standort nicht freigegeben', false); showLocationHelp(); }
+        else setStatus('Kein GPS-Signal – bitte draußen versuchen', false);
+      },
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
     );
   } else {
@@ -596,12 +599,52 @@
     meEl.style.transform = `translate(${pt.x - 22}px, ${pt.y - 22}px)`;
   }
 
+  // ---------- Hilfe bei verweigertem Standort ----------
+  function showLocationHelp() {
+    const ua = navigator.userAgent;
+    const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const steps = ios ? [
+      'iPhone-Einstellungen öffnen → Datenschutz & Sicherheit → Ortungsdienste: einschalten.',
+      'Weiter unten „Safari-Websites“ (bzw. „Chrome“) antippen → „Beim Verwenden der App“ wählen und „Genauer Standort“ aktivieren.',
+      'In Safari auf „aA“ links in der Adressleiste tippen → Website-Einstellungen → Standort: „Erlauben“.',
+      'Zurück zu DiZcover und „Neu laden“ tippen.'
+    ] : [
+      'Am Handy den Standort einschalten (Schnelleinstellungen oben herunterziehen → „Standort“).',
+      'In Chrome links neben der Adresse auf das Symbol tippen → Berechtigungen → Standort: „Zulassen“.',
+      'Falls dort nichts geht: Android-Einstellungen → Apps → Chrome → Berechtigungen → Standort: „Nur während der Nutzung zulassen“ und „Genauen Standort verwenden“.',
+      'Zurück zu DiZcover und „Neu laden“ tippen.'
+    ];
+    showModal({
+      title: 'Standort freigeben',
+      text: 'DiZcover braucht deinen Standort, um den Nebel aufzudecken. Der Zugriff ist auf diesem Gerät gerade gesperrt.',
+      list: steps,
+      hint: 'Tipp: Wurde der Link in WhatsApp, Instagram o. Ä. geöffnet, ihn bitte direkt im Browser öffnen (⋮ bzw. Teilen → „Im Browser öffnen“).',
+      buttons: [
+        { label: 'Später' },
+        { label: 'Neu laden', primary: true, onClick: () => location.reload() }
+      ]
+    });
+  }
+
   // ---------- Dialog ----------
-  function showModal({ title, text, buttons, win }) {
+  function showModal({ title, text, buttons, win, list, hint }) {
     const m = el('modal');
     el('modalTitle').textContent = title;
     el('modalText').textContent = text;
     m.classList.toggle('win', !!win);
+    const card = m.querySelector('.modal-card');
+    card.querySelectorAll('ol, .hint').forEach(n => n.remove());
+    const box0 = el('modalButtons');
+    if (list) {
+      const ol = document.createElement('ol');
+      for (const t of list) { const li = document.createElement('li'); li.textContent = t; ol.appendChild(li); }
+      card.insertBefore(ol, box0);
+    }
+    if (hint) {
+      const h = document.createElement('p');
+      h.className = 'hint'; h.textContent = hint;
+      card.insertBefore(h, box0);
+    }
     const box = el('modalButtons');
     box.innerHTML = '';
     for (const b of buttons) {
