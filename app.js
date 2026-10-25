@@ -370,7 +370,10 @@
     return Math.hypot(dx, dy);
   }
 
+  let pendingPlan = null;
+
   function askSoulRound() {
+    pendingPlan = preparePlan();     // Platzierung + Prüfung laufen schon, während der Dialog offen ist
     showModal({
       title: 'Seelenrunde?',
       text: `In deinem Gebiet irren ${SOUL_COUNT} verlorene Seelen umher. Sammle sie alle ein und bring sie zum Seelenfriedhof, damit sie Ruhe finden.`,
@@ -386,12 +389,10 @@
     });
   }
 
-  function startSoulRound() {
+  // Würfelt Positionen aus und startet im Hintergrund die Gebäude-/Wasserprüfung
+  function preparePlan() {
     const pts = placePoints(SOUL_COUNT + 2);
-    if (!pts) {
-      showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
-      return;
-    }
+    if (!pts) return null;
     // Der Punkt am weitesten vom Spieler wird zum Startpunkt des Portiers
     let pi = 0;
     if (lastPos) {
@@ -400,10 +401,28 @@
     }
     const porter = pts.splice(pi, 1)[0];
     const [grave, ...souls] = pts;
+    const plan = {
+      grave: { lat: grave[0], lng: grave[1], ok: false },
+      souls: souls.map(p => ({ lat: p[0], lng: p[1], taken: false, ok: false })),
+      porter: { lat: porter[0], lng: porter[1], mode: 'wander', target: null, cooldownUntil: 0 }
+    };
+    validatePlan(plan);
+    return plan;
+  }
+
+  function startSoulRound() {
+    const plan = pendingPlan || preparePlan();
+    pendingPlan = null;
+    if (!plan) {
+      showModal({ title: 'Gebiet zu klein', text: 'Für eine Seelenrunde braucht es ein größeres Gebiet.', buttons: [{ label: 'OK', primary: true }] });
+      return;
+    }
+    // Sofort starten. Was noch nicht geprüft ist, wird im Hintergrund weitergeprüft
+    // (dieselben Objekte, Umsetzungen wirken also direkt im Spiel).
     state.game = {
-      grave: { lat: grave[0], lng: grave[1] },
-      souls: souls.map(p => ({ lat: p[0], lng: p[1], taken: false })),
-      porter: { lat: porter[0], lng: porter[1], mode: 'wander', target: null, cooldownUntil: 0 },
+      grave: plan.grave,
+      souls: plan.souls,
+      porter: plan.porter,
       compass: COMPASS_START,
       compassEarned: grid && grid.total ? Math.floor(grid.count / grid.total * 10) : 0,
       caught: 0,
@@ -417,6 +436,110 @@
     updateCompassButton();
     checkProximity();
     queueFog();
+  }
+
+  // ---------- Gebäude & Wasser per Kartenfarbe erkennen ----------
+  // Die OSM-Karte malt Gebäude und Wasser in festen Farben. Wir lesen das Kartenbild
+  // an der Stelle aus (Zoom 18, ca. 0,4 m pro Pixel). Keine Zusatzdaten, kein Fremdserver.
+  const CHECK_Z = 18;
+  const BLOCK_COLORS = [
+    [217, 208, 201],   // Gebäude (#d9d0c9)
+    [196, 182, 171],   // große Gebäude: Kirchen, Bahnhöfe … (darken 10 %)
+    [185, 169, 156],   // Gebäude-Umriss (darken 15 %)
+    [170, 211, 223]    // Wasser (#aad3df)
+  ];
+  const COLOR_TOL = 14;
+  const tileCache = new Map();
+  let tileCheckBroken = false;   // Server erlaubt kein Auslesen -> Prüfung still aus
+
+  function tileOf(lat, lng) {
+    const n = 2 ** CHECK_Z;
+    const x = (lng + 180) / 360 * n;
+    const r = lat * Math.PI / 180;
+    const y = (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n;
+    const tx = Math.floor(x), ty = Math.floor(y);
+    return { tx, ty, px: Math.floor((x - tx) * 256), py: Math.floor((y - ty) * 256) };
+  }
+
+  function loadTile(tx, ty) {
+    const key = tx + '/' + ty;
+    if (!tileCache.has(key)) {
+      const job = (async () => {
+        if (tileCheckBroken) return null;
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 8000);
+          const res = await fetch(`https://tile.openstreetmap.org/${CHECK_Z}/${tx}/${ty}.png`, { mode: 'cors', signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) return null;
+          const bmp = await createImageBitmap(await res.blob());
+          const c = document.createElement('canvas');
+          c.width = c.height = 256;
+          const cx = c.getContext('2d', { willReadFrequently: true });
+          cx.drawImage(bmp, 0, 0);
+          return cx.getImageData(0, 0, 256, 256).data;
+        } catch (e) {
+          if (e && (e.name === 'TypeError' || e.name === 'SecurityError')) tileCheckBroken = true;
+          return null;
+        }
+      })();
+      tileCache.set(key, job);
+    }
+    return tileCache.get(key);
+  }
+
+  // true = Gebäude/Wasser, false = frei, null = unbekannt
+  async function isBlockedAt(lat, lng) {
+    const { tx, ty, px, py } = tileOf(lat, lng);
+    const data = await loadTile(tx, ty);
+    if (!data) return null;
+    let hits = 0, total = 0;
+    for (let dy = -4; dy <= 4; dy += 2) for (let dx = -4; dx <= 4; dx += 2) {
+      const x = Math.min(255, Math.max(0, px + dx)), y = Math.min(255, Math.max(0, py + dy));
+      const o = (y * 256 + x) * 4;
+      const r = data[o], g = data[o + 1], b = data[o + 2];
+      total++;
+      if (BLOCK_COLORS.some(c => Math.abs(c[0] - r) + Math.abs(c[1] - g) + Math.abs(c[2] - b) <= COLOR_TOL * 2)) hits++;
+    }
+    return hits >= total * 0.4;     // Beschriftungen auf Gebäuden stören so nicht
+  }
+
+  function isLive(plan) { return !!(state.game && state.game.souls === plan.souls); }
+
+  // Neuer zufälliger Punkt mit Abstand zu den anderen und zum Spieler
+  function rerollPoint(others) {
+    const g = grid;
+    if (!g) return null;
+    const minOther = Math.max(12, 0.3 * Math.sqrt(g.areaM2 / (SOUL_COUNT + 2)));
+    for (let t = 0; t < 600; t++) {
+      const p = randomInside(30, true);
+      if (!p) return null;
+      if (others.every(o => distM(p[0], p[1], o.lat, o.lng) >= minOther * (t < 300 ? 1 : 0.5))) return p;
+    }
+    return null;
+  }
+
+  async function validatePlan(plan) {
+    const items = [plan.grave, ...plan.souls];
+    // alle benötigten Kacheln parallel vorladen
+    await Promise.all(items.filter(it => !it.ok).map(it => { const t = tileOf(it.lat, it.lng); return loadTile(t.tx, t.ty); }));
+    for (const it of items) {
+      if (it.ok) continue;
+      let moved = false;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (it.taken || tileCheckBroken) break;
+        const blocked = await isBlockedAt(it.lat, it.lng);
+        if (blocked !== true) break;
+        // Eine Seele, die der Spieler schon gesehen hat, bleibt, wo sie ist
+        if (it !== plan.grave && isLive(plan) && isRevealed(it.lat, it.lng)) break;
+        const np = rerollPoint(items.filter(o => o !== it));
+        if (!np) break;
+        it.lat = np[0]; it.lng = np[1];
+        moved = true;
+      }
+      it.ok = true;
+      if (isLive(plan)) { save(); if (moved) { buildPOIs(); checkProximity(); } }
+    }
   }
 
   // Zufällige, gut verteilte Punkte im Polygon (Abstand zueinander, zum Rand und zum Spieler)
@@ -1053,6 +1176,7 @@
   buildPOIs();
   updateProgress();
   updateCompassButton();
+  if (state.game && !state.game.doneAt && !state.game.aborted && grid) validatePlan(state.game);
   queueFog();
   if (sim) {
     // Testmodus: Start in Deggendorf-Mitte

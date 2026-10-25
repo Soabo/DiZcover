@@ -8,6 +8,9 @@ Nach dem Zeichnen fragt die App, ob eine Seelenrunde gespielt werden soll. Dann 
 - Seele aufnehmen: höchstens 5 m entfernt stehen, dann erscheint „Seele aufnehmen“.
 - Sind alle 8 gesammelt: zum Friedhof (höchstens 10 m) und „Seelen abgeben“.
 
+### Keine Seelen in Gebäuden oder Wasser
+Beim Dialog „Seelenrunde?“ werden die Positionen schon ausgewürfelt und im Hintergrund geprüft: Die App liest an jeder Stelle die Farbe der OSM-Kartenkachel (Zoom 18) aus. Gebäude- oder Wasserfarbe → neu würfeln. Die Runde startet trotzdem sofort; was noch nicht geprüft ist, wird unsichtbar im Nebel umgesetzt. Kann die Karte nicht gelesen werden, bleibt alles wie es ist.
+
 ### Nachtportier, Seelenlast, Seelenkompass
 - Der Nachtportier patrouilliert unsichtbar im Gebiet (0,5 m/s). Spürt er dich, folgt er dir mit 0,9–1,2 m/s (langsamer als Gehen). Bei ≤ 8 m Abstand flieht eine getragene Seele an einen neuen Ort im Nebel; danach zieht er sich 45 s zurück.
 - Seelenlast: Spürweite 30 m + 10 m pro getragener Seele.
