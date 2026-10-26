@@ -26,7 +26,8 @@
   const PORTER_SENSE_PER_SOUL_M = 10;  // … plus pro getragener Seele (Seelenlast)
   const PORTER_WANDER_SPEED = 0.5;     // m/s beim Patrouillieren
   const PORTER_HUNT_SPEED = 0.9;       // m/s beim Verfolgen …
-  const PORTER_HUNT_PER_SOUL = 0.04;   // … plus pro Seele (max. ~1,2 m/s, langsamer als Gehen)
+  const PORTER_SPEED_PER_SOUL = 1.05;  // … je getragener Seele 5 % schneller (gilt auch beim Patrouillieren)
+  const PORTER_GHOST_AT = 6;           // ab so vielen Seelen: Geistergestalt, geht durch alles hindurch
   const PORTER_COOLDOWN_MS = 45000;    // Rückzug nach einem Fang
   // Seelenkompass
   const COMPASS_START = 1;
@@ -380,7 +381,7 @@
       text: `In deinem Gebiet irren ${SOUL_COUNT} verlorene Seelen umher. Sammle sie alle ein und bring sie zum Seelenfriedhof, damit sie Ruhe finden.`,
       list: [
         'Der Nachtportier streift unsichtbar durch den Nebel. Bemerkt er dich, folgt er dir langsam – das Handy pocht und der Rand färbt sich rot. Erwischt er dich, flieht eine deiner Seelen.',
-        'Seelenlast: Je mehr Seelen du trägst, desto weiter spürt er dich.',
+        `Seelenlast: Mit jeder Seele, die du trägst, spürt er dich weiter und wird 5 % schneller. Ab der ${PORTER_GHOST_AT}. Seele entfesselt er seine Geistergestalt und kommt durch alles hindurch direkt auf dich zu.`,
         'Seelenkompass: zeigt kurz die Richtung zur nächsten Seele. Für je 10 % aufgedecktes Gebiet gibt es eine neue Ladung.'
       ],
       buttons: [
@@ -644,6 +645,7 @@
       if (p.kind === 'porter') {
         p.lat = g.porter.lat; p.lng = g.porter.lng;
         p.el.classList.toggle('hunting', g.porter.mode === 'hunt' && !g.doneAt && !g.aborted);
+        p.el.classList.toggle('ghost', carried(g) >= PORTER_GHOST_AT && !g.doneAt && !g.aborted);
       }
       const pt = map.latLngToContainerPoint([p.lat, p.lng]);
       const off = pt.x < -60 || pt.y < -60 || pt.x > size.x + 60 || pt.y > size.y + 60;
@@ -711,7 +713,16 @@
       buzz(60);
       updateProgress();
       const n = g.souls.filter(x => x.taken).length;
-      if (n === SOUL_COUNT) {
+      if (n === PORTER_GHOST_AT && !g.ghostShown) {
+        g.ghostShown = true;
+        save();
+        buzz([150, 80, 150, 80, 400]);
+        showModal({
+          title: 'Er ist entfesselt',
+          text: 'Der Nachtportier hat seine Geistergestalt entfesselt. Er gleitet jetzt durch Mauern und Häuser direkt auf dich zu. Beeil dich!',
+          buttons: [{ label: 'Weiter', primary: true }]
+        });
+      } else if (n === SOUL_COUNT) {
         showModal({ title: 'Alle Seelen gefunden', text: 'Bring die acht Seelen jetzt zum Seelenfriedhof, damit sie Ruhe finden.', buttons: [{ label: 'Los geht’s', primary: true }] });
       }
       checkProximity();
@@ -803,13 +814,12 @@
       setStatus('Der Nachtportier hat deine Spur verloren', false);
     }
 
-    const speed = P.mode === 'hunt'
-      ? PORTER_HUNT_SPEED + PORTER_HUNT_PER_SOUL * carried(g)
-      : PORTER_WANDER_SPEED;
-    if (nav && nav.area === state.area) {
+    const ghost = carried(g) >= PORTER_GHOST_AT;
+    const speed = (P.mode === 'hunt' ? PORTER_HUNT_SPEED : PORTER_WANDER_SPEED) * PORTER_SPEED_PER_SOUL ** carried(g);
+    if (!ghost && nav && nav.area === state.area) {
       [px, py] = navStep(P, px, py, me, speed * dt);   // nur auf Straßen und Wegen
     } else {
-      // Fallback ohne Straßennetz: Luftlinie
+      // Geistergestalt oder kein Straßennetz: Luftlinie
       let tx, ty;
       if (P.mode === 'hunt') {
         [tx, ty] = me;
@@ -822,7 +832,7 @@
       if (dist > 0.05) {
         const step = Math.min(dist, speed * dt);
         const nx = px + (tx - px) / dist * step, ny = py + (ty - py) / dist * step;
-        if (insideXY(nx, ny)) { px = nx; py = ny; }       // der Portier verlässt das Gebiet nie
+        if (ghost || insideXY(nx, ny)) { px = nx; py = ny; }   // als Geist ohne jede Grenze
         else if (P.mode === 'wander') P.target = null;
       }
       if (P.mode === 'wander' && dist < 3) P.target = null;
