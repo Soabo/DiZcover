@@ -242,7 +242,7 @@
     const g = state.game;
     if (g && g.aborted) return 'Weiter';
     if (g && !g.doneAt) return 'Beenden & Seelen aufdecken';
-    return state.area ? 'Neues Gebiet' : 'Verschleiern';
+    return state.area ? 'Neues Gebiet' : 'Neues Gebiet verschleiern';
   }
 
   function abortHunt() {
